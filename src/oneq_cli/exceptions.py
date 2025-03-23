@@ -9,3 +9,11 @@ class ApiKeyNotFound(OneQError):
 class ConfigurationError(OneQError):
     """Raised for general configuration issues."""
     pass
+
+class ApiKeySetupCancelled(OneQError):
+    """Raised when the user cancels the API key setup TUI."""
+    pass
+
+class GeminiApiError(OneQError):
+    """Raised when there's an error communicating with the Gemini API."""
+    pass

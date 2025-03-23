@@ -12,6 +12,7 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 ## Table of Contents
 
 *   [Features](#features)
+*   [Introduction](#introduction)
 *   [Installation](#installation)
 *   [Usage](#usage)
 *   [Configuration](#configuration)
@@ -20,16 +21,16 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 
 ## Features
 
-*   Natural language to command generation
-*   Cross-platform compatibility
-*   Command preview and modification
-*   Direct command execution
-*   Multiple output styles (TUI, inline, auto)
-*   Configuration file for persistent settings
+*   **Natural Language to Command:** Converts your natural language queries into executable shell commands.
+*   **Cross-Platform Compatibility:** Works seamlessly on Linux, macOS, and Windows.
+*   **Interactive Mode:** Supports interactive command review, modification, and execution.
+*   **Configurable:** Allows you to set default output styles and manage your Gemini API key.
+
+## Introduction
+
+`1q` bridges the gap between human language and machine commands. Simply ask `1q` what you want to do, and it will generate the appropriate command for you. Whether you're a seasoned developer or new to the command line, `1q` helps you save time and effort.
 
 ## Installation
-
-Installation instructions and usage examples will be added soon, after publishing on PyPI.
 
 ```bash
 pip install oneq
@@ -38,30 +39,27 @@ pip install oneq
 ## Usage
 
 ```bash
-1q "your query here"
+1q <your_query>
 ```
 
-### Example: 1q "list files in Documents ending with .pdf"
-
-```text
-ls -l ~/Documents | grep '\.pdf$'
+For example: 1q list files in Documents ending with .pdf
 ```
 
-The result will depend on your shell, operating system, the AI model selected and its configuration.
-
-### Usage Examples from CLI help
-
+Here's the complete help printout.
 ```text
-usage: 1q [-h] [-v] [--show-config-path] [--clear-config]
-          [--set-default-output STYLE] ...
+usage: 1q [-h] [--show-config-path] [--clear-config] [--set-default-output {auto,tui,inline}] [-v] [query]
 
 1Q - The right one-liner is just one query away.
 
-positional arguments:
+Positional Arguments:
   query                 The natural language query for generating commands.
 
-options:
+Optional Arguments:
   -h, --help            show this help message and exit
+
+Display and Configuration:
+  These actions configure 1q or display useful information. Requires arguments like --set-default-output STYLE, STYLE being a valid option (auto, tui, inline).
+  Missing arguments or invalid options result in no change to the config default.
   -v, --version         show program's version number and exit
 
 Configuration and Info Actions:

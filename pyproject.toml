@@ -16,26 +16,38 @@ authors = [
 ]
 keywords = ["cli", "ai", "commandgen", "codegen", "devtool"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12"
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Utilities",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 
 dependencies = [
     "google-generativeai",
-    "textual",
-    "platformdirs",
-    "rich"
+    "textual>=0.50.0",
+    "platformdirs>=3.0.0",
+    "rich",
+    "pyperclip>=1.8.0"
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pytest-cov",
-    "ruff" # Linter and formatter
+    "ruff", # Linter and formatter
     # Add other dev tools if needed (e.g., mypy)
 ]
 
