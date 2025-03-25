@@ -24,61 +24,88 @@ def _get_platform_context() -> str:
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
         except AttributeError:
-            # Handle cases where platform.freedesktop_os_release() is not available
-            os_name = "Linux (Distribution info unavailable)"
-        context_parts.append(f"OS: {os_name}")
+            # Handle cases where freedesktop_os_release is not available (older Python versions)
+            try:
+                import distro
+                os_name += f" ({distro.name()})"
+            except ImportError:
+                pass  # Fallback to just "Linux"
+        context_parts.append(f"Operating System: {os_name}")
     else:
-        context_parts.append(f"OS: {system}")
+        context_parts.append(f"Operating System: {system}")
 
-    shell = os.environ.get("SHELL", "Unknown Shell")
+    shell = os.environ.get("SHELL") or os.environ.get("COMSPEC") or "Unknown shell"
     context_parts.append(f"Shell: {shell}")
-
     return ", ".join(context_parts)
 
-
-def generate_command(prompt: str, api_key: str) -> Dict[str, Any]:
+def generate_command(query: str, api_key: str) -> Dict[str, Any]:
     """
     Generates a shell command and explanation using the Gemini API.
 
     Args:
-        prompt: The natural language query.
-        api_key: The Gemini API key.
+        query (str): The natural language query.
+        api_key (str): The Gemini API key.
 
     Returns:
-        A dictionary containing the generated command and explanation.
+        Dict[str, Any]: A dictionary containing the generated command and explanation.
+
+    Raises:
+        GeminiApiError: If there's an error communicating with the Gemini API.
     """
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
     platform_context = _get_platform_context()
 
-    enriched_prompt = f"""
-    You are an expert command-line tool that translates natural language into executable commands.
-    Your goal is to understand the user's intent and provide the single best command that fulfills their request.
-    Consider the user's platform to provide compatible commands. Current platform context: {platform_context}.
-    Output the command in a single line, without any additional formatting or comments.
-
-    User query: {prompt}
+    prompt = f"""
+    You are a helpful assistant that translates natural language queries into shell commands.
+    Your responses are structured as JSON, with a "command" key for the shell command and an "explanation" key
+    for a brief explanation of what the command does.
+    Here is platform context for more precise command generation: {platform_context}.
+    If the query is ambiguous, ask for clarification.
+    If you cannot generate a command, return a JSON object with an "error" key describing the problem.
+    For example:
+    {{
+      "command": "ls -l",
+      "explanation": "This command lists all files and directories in the current directory with detailed information."
+    }}
+    Now, respond to the following query: {query}
     """
 
     try:
-        response = model.generate_content(enriched_prompt)
+        response = model.generate_content(prompt)
         response.resolve()
+        response_text = response.text
 
-        if response.prompt_feedback and response.prompt_feedback.block_reason:
-            raise GeminiApiError(f"The Gemini API blocked the request due to: {response.prompt_feedback.block_reason}")
+        # Basic JSON validation (more robust validation might be needed)
+        if not isinstance(response_text, str):
+            raise GeminiApiError(f"Gemini API returned non-string response: {response_text}")
 
-        command = response.text.strip()
-        explanation = "This command was generated based on your query. Review it carefully before execution." # For now, a static explanation
+        # Attempt to extract JSON using regex (safer than naive eval)
+        json_match = None
+        try:
+            import json
+            json_match = json.loads(response_text)
+        except json.JSONDecodeError as e:
+             raise GeminiApiError(f"Failed to decode JSON from Gemini API response: {e}. Raw response: {response_text}") from e
 
-        return {"command": command, "explanation": explanation}
+        if json_match is None or not isinstance(json_match, dict):
+            raise GeminiApiError(f"Could not parse JSON from the response. Raw response: {response_text}")
 
-    except google_exceptions.QuotaExceeded as e:
-         raise GeminiApiError(
-             f"Gemini API Quota Exceeded: You have exceeded your API quota. ({e})") from e
+        return json_match
+
+    except google_exceptions.APIError as e:
+        raise GeminiApiError(
+            f"Gemini API Error: {e}") from e # General API error (check inner exception for details)
+    except google_exceptions.InvalidArgument as e:
+        raise GeminiApiError(
+            f"Gemini API Invalid Argument: Check your prompt or API key. ({e})") from e
+    except google_exceptions.PermissionDenied as e:
+        raise GeminiApiError(
+            f"Gemini API Permission Denied: Insufficient permissions or API not enabled. ({e})") from e
     except google_exceptions.ResourceExhausted as e:
-         raise GeminiApiError(
-             f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+        raise GeminiApiError(
+            f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:

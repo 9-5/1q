@@ -12,7 +12,6 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 ## Table of Contents
 
 *   [Features](#features)
-*   [Introduction](#introduction)
 *   [Installation](#installation)
 *   [Usage](#usage)
 *   [Configuration](#configuration)
@@ -21,14 +20,10 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 
 ## Features
 
-*   **Natural Language to Command:** Converts your natural language queries into executable shell commands.
-*   **Cross-Platform Compatibility:** Works seamlessly on Linux, macOS, and Windows.
-*   **Interactive Mode:** Supports interactive command review, modification, and execution.
-*   **Configurable:** Allows you to set default output styles and manage your Gemini API key.
-
-## Introduction
-
-`1q` bridges the gap between human language and machine commands. Simply ask `1q` what you want to do, and it will generate the appropriate command for you. Whether you're a seasoned developer or new to the command line, `1q` helps you save time and effort.
+*   **Natural Language to Command:** Describe what you want to do, and 1q generates the command for you.
+*   **Cross-Platform:** Works on Linux, macOS, and Windows.
+*   **Interactive TUI:** Refine and execute commands through a Textual UI.
+*   **Configuration:** Customize 1q with a configuration file.
 
 ## Installation
 
@@ -39,27 +34,25 @@ pip install oneq
 ## Usage
 
 ```bash
-1q <your_query>
+1q <your query>
 ```
 
-For example: 1q list files in Documents ending with .pdf
+Example: 1q list files in Documents ending with .pdf
+
+```bash
+1q --help
 ```
 
-Here's the complete help printout.
-```text
-usage: 1q [-h] [--show-config-path] [--clear-config] [--set-default-output {auto,tui,inline}] [-v] [query]
+```
+usage: 1q [-h] [-v] [--show-config-path] [--clear-config] [--set-default-output STYLE] [query]
 
 1Q - The right one-liner is just one query away.
 
-Positional Arguments:
-  query                 The natural language query for generating commands.
+positional arguments:
+  query                 The query to translate into a command.
 
-Optional Arguments:
+options:
   -h, --help            show this help message and exit
-
-Display and Configuration:
-  These actions configure 1q or display useful information. Requires arguments like --set-default-output STYLE, STYLE being a valid option (auto, tui, inline).
-  Missing arguments or invalid options result in no change to the config default.
   -v, --version         show program's version number and exit
 
 Configuration and Info Actions:
