@@ -23,74 +23,95 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except Exception:
-            pass  # Ignore errors getting distro info
-        context_parts.append(f"OS: {os_name}")
+        except AttributeError:
+            # Handle potential errors with platform.freedesktop_os_release()
+            pass
+        context_parts.append(os_name)
+    elif system == "Windows":
+        context_parts.append("Windows")
+    elif system == "Darwin":
+        context_parts.append("macOS")
+    else:
+        context_parts.append(system)
 
-    shell = os.environ.get("SHELL")
-    if shell:
-        shell_name = os.path.basename(shell)
-        context_parts.append(f"Shell: {shell_name}")
+    shell = os.environ.get("SHELL") or os.environ.get("COMSPEC") or "Unknown Shell"
+    context_parts.append(f"Shell: {shell}")
 
     return ", ".join(context_parts)
 
 
-def resolve_query(query: str, api_key: str) -> Dict[str, Any]:
-    """
-    Resolves a natural language query into a shell command and explanation using the Gemini API.
+def init_gemini(api_key: str) -> None:
+    """Initializes the Gemini API with the provided API key."""
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        raise GeminiApiError(f"Failed to configure Gemini API: {e}") from e
 
-    Args:
-        query: The natural language query.
-        api_key: The Gemini API key.
+
+def generate_command(user_query: str) -> Dict[str, Any]:
+    """Generates a command using the Gemini API based on the user query.
 
     Returns:
-        A dictionary containing the generated command and explanation.
-        Returns empty strings if the API call fails or the response is malformed.
-
-    Raises:
-        GeminiApiError: If there is an error communicating with the Gemini API.
+        A dictionary containing the generated command, explanation, and any relevant notes.
     """
-    genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
     platform_context = _get_platform_context()
 
     prompt = f"""
-    You are a helpful AI assistant that translates natural language queries into shell commands.
-    Your responses should be concise and to the point.
-    Consider the user's platform for command generation: {platform_context}.
-    Provide the command, and a brief explanation of what the command does.
+    You are an expert command-line assistant.  A user will provide a description of a task, and you will generate a single command that performs that task.
+    The command should be as concise as possible.
+    Consider the user's platform when generating the command.
+    The user's platform is: {platform_context}.
+    If the user asks for code, provide a complete code snippet, including necessary imports.  Assume the user is using the latest version of Python unless otherwise specified.
+    Do not include any introductory or explanatory text before the command or code.
+    If the request is ambiguous, ask clarifying questions.
+    If you are unable to generate a command, explain why.
+    Provide a brief explanation of the command.
+    Also provide any important notes or warnings about the command's usage.
 
-    Example:
-    User Query: list files in Documents ending with .pdf
-    Command: ls ~/Documents/*.pdf
-    Explanation: Lists all files in the Documents directory that end with the .pdf extension.
-
-    Now, respond to the following query:
-    User Query: {query}
+    User Query: {user_query}
     """
 
     try:
         response = model.generate_content(prompt)
-        response.raise_for_status()
+        response.resolve()  # Force the API call to check for errors eagerly
 
-        response_text = response.text
+        if response.prompt_feedback and response.prompt_feedback.block_reason:
+            raise GeminiApiError(f"The Gemini API blocked the request due to: {response.prompt_feedback.block_reason}")
 
-        # Simple parsing to extract command and explanation.  Handle missing parts gracefully.
-        command_match = re.search(r"Command:\s*(.+)", response_text)
-        explanation_match = re.search(r"Explanation:\s*(.+)", response_text)
+        command = response.text.strip()
 
-        command = command_match.group(1).strip() if command_match else ""
-        explanation = explanation_match.group(1).strip() if explanation_match else ""
+        # Basic filtering (can be expanded)
+        command = command.replace("`", "") #Remove backticks
 
-        return {"command": command, "explanation": explanation}
+        return {
+            "command": command,
+            "explanation": "Explanation of the command.", #TODO: Get explanation from model
+            "notes": "Important notes about the command." #TODO: Get notes from model
+        }
 
+    except google_exceptions.QuotaExceeded as e:
+        raise GeminiApiError(f"Gemini API Quota Exceeded: Have you exceeded your API usage limits? ({e})") from e
+    except google_exceptions.PermissionDenied as e:
+        raise GeminiApiError(f"Gemini API Permission Denied: Check your API key and permissions. ({e})") from e
     except google_exceptions.ServiceUnavailable as e:
         raise GeminiApiError(f"Gemini API Service Unavailable: The service is currently unavailable. ({e})") from e
-    except google_exceptions.Timeout as e:
-        raise GeminiApiError(f"Gemini API Timeout: The request timed out. ({e})") from e
-    except google_exceptions.QuotaExceeded as e:
-        raise GeminiApiError(f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+    except google_exceptions.APIError as e:
+        raise GeminiApiError(f"Gemini API Error: A general API error occurred. ({e})") from e
+    except google_exceptions.InvalidArgument as e:
+        raise GeminiApiError(f"Gemini API Invalid Argument: Check your request parameters. ({e})") from e
+    except google_exceptions.NotFound as e:
+        raise GeminiApiError(f"Gemini API Not Found: The requested resource was not found. ({e})") from e
+    except google_exceptions.InternalServerError as e:
+        raise GeminiApiError(
+            "Gemini API Internal Server Error: An unexpected error occurred on the server. ({e})") from e
+    except google_exceptions.DeadlineExceeded as e:
+        raise GeminiApiError(
+            "Gemini API Deadline Exceeded: The request timed out. Consider simplifying your query. ({e})") from e
+    except google_exceptions.ResourceExhausted as e:
+        raise GeminiApiError(
+            "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:

@@ -13,6 +13,7 @@ from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label
 
+ResponseAppResult = Optional[Literal["copy", "execute", "modify", "refine"]]
 
 class ApiKeyApp(App[Union[str, None]]):
     """TUI App to prompt for the Gemini API Key."""
@@ -22,127 +23,111 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Vertical {
+    Container {
         width: auto;
         height: auto;
-        layout: vertical;
-        border: tall $panel;
-        padding: 1;
+        border: tall $primary;
+        padding: 2;
     }
-    Input {
-        width: 60;
-        margin-bottom: 1;
-    }
-    Button {
-        width: 100%;
-    }
+    Input { width: 60; }
+    Button { width: 100%; margin-top: 1; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical():
-            yield Label(self.SUB_TITLE)
-            api_key_input = Input(placeholder="Paste API Key here", id="api-key-input")
-            api_key_input.focus()
-            yield api_key_input
-            yield Button("Save API Key", id="save-api-key", variant="primary")
-            yield Button("Cancel", id="cancel", variant="default")
+        yield Header(title=self.TITLE, subtitle=self.SUB_TITLE)
+        yield Container(
+            Label("API Key:"),
+            Input(placeholder="Paste your Google AI Studio API Key here", id="api-key-input"),
+            Button("Save", id="save-api-key", variant="primary"),
+            Button("Cancel", id="cancel-api-key")
+        )
         yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Event handler called when a button is pressed."""
-        button_id = event.control.id
-
+        button_id = event.button.id
         if button_id == "save-api-key":
             api_key = self.query_one("#api-key-input", Input).value
             if api_key:
                 self.exit(api_key)
             else:
-                self.notify("API Key cannot be empty.", title="Input Error", severity="error", timeout=3.0)
-        elif button_id == "cancel":
+                self.notify("Please enter an API key.", title="Error", severity="error")
+        elif button_id == "cancel-api-key":
             self.exit(None)
 
 
-def get_gemini_api_key_from_tui() -> Optional[str]:
-    """Launches a Textual app to get the Gemini API key from the user."""
-    app = ApiKeyApp()
-    api_key = app.run()
-    return api_key
-
-
-class ResponseApp(App[Union[Literal["execute", "modify", "refine", "copy"], None]]):
-    """TUI App to display the response and available actions."""
+class ResponseApp(App[ResponseAppResult]):
+    """Textual app to display the command and offer actions."""
 
     CSS = """
     Screen {
         layout: vertical;
     }
 
-    #command-container {
+    #response-area {
+        height: 70%;
         border: tall $secondary;
         margin: 1;
-        padding: 1;
     }
 
-    #explanation-container {
-        border: tall $primary;
+    #button-area {
+        height: 10%;
+        layout: horizontal;
         margin: 1;
-        padding: 1;
     }
 
     Button {
-        width: 100%;
-        margin-bottom: 1;
+        width: 20%;
+        margin: 0 1;
     }
     """
 
     BINDINGS = [
-        Binding("a", "execute", "Execute Command", show=True),
-        Binding("m", "modify_command", "Modify Command", show=True),
+        Binding("c", "copy", "Copy to Clipboard", show=True),
+        Binding("e", "execute", "Execute", show=True),
+        Binding("m", "modify_command", "Modify", show=True),
         Binding("r", "refine_query", "Refine Query", show=True),
-        Binding("c", "copy_command", "Copy Command", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
-
-    def __init__(self, response_data: Dict[str, Any], **kwargs: Any) -> None:
+    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
         super().__init__(**kwargs)
-        self.response_data = response_data
         self.command_text: str = response_data.get("command", "")
         self.explanation_text: str = response_data.get("explanation", "")
-        self.user_query: str = response_data.get("query", "")  #If we start passing the query
-
+        self.notes_text: str = response_data.get("notes", "")
+        self.response_data = response_data # Keep the raw response for now.
 
     def compose(self) -> ComposeResult:
-        """Create child widgets for the app."""
-        yield Header(title="1Q Response", subtitle="Review and Actions")
-        with Container(id="command-container"):
-            yield Label("Command:", style="bold")
-            yield Markdown(f"```bash\n{self.command_text}\n```")
+        """Compose the UI."""
+        yield Header(title="1Q Response", show_clock=True)
 
-        with Container(id="explanation-container"):
-            yield Label("Explanation:", style="bold")
-            yield Label(self.explanation_text)
+        with Container(id="response-area"):
+            yield Static(f"[bold]Command:[/]\n{self.command_text}", id="command-output")
+            yield Static(f"[bold]Explanation:[/]\n{self.explanation_text}", id="explanation-output")
+            yield Static(f"[bold]Notes:[/]\n{self.notes_text}", id="notes-output")
 
-        yield Button("Execute Command", id="execute", variant="primary")
-        yield Button("Modify Command", id="modify", variant="warning")
-        yield Button("Refine Query", id="refine", variant="default")
-        yield Button("Copy Command", id="copy", variant="default")
+        with Container(id="button-area"):
+            yield Button("Copy", id="copy-button", binding_key="c")
+            yield Button("Execute", id="execute-button", binding_key="e")
+            yield Button("Modify", id="modify-button", binding_key="m")
+            yield Button("Refine Query", id="refine-query-button", binding_key="r")
+
+
         yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Event handler called when a button is pressed."""
-        button_id = event.control.id
-        if button_id == "execute":
+        button_id = event.button.id
+        if button_id == "copy-button":
+            self.action_copy()
+        elif button_id == "execute-button":
             self.action_execute()
-        elif button_id == "modify":
+        elif button_id == "modify-button":
             self.action_modify_command()
-        elif button_id == "refine":
+        elif button_id == "refine-query-button":
             self.action_refine_query()
-        elif button_id == "copy":
-            self.action_copy_command()
 
-    def action_copy_command(self) -> None:
+    def action_copy(self) -> None:
         """Exits the TUI signalling to copy the command."""
         if not self.command_text:
              self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
@@ -162,3 +147,14 @@ class ResponseApp(App[Union[Literal["execute", "modify", "refine", "copy"], None
              self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
              return
         self.exit("modify")
+
+    def action_refine_query(self) -> None:
+        """Exits the TUI signalling to refine the query."""
+        self.exit("refine")
+
+
+def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
+    """Runs the ResponseApp and returns the chosen action."""
+    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
+    result = app.run()
+    return result

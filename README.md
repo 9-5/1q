@@ -12,9 +12,43 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 ## Table of Contents
 
 *   [Features](#features)
-*   [In
-... (FILE CONTENT TRUNCATED) ...
-ig default.
+*   [Installation](#installation)
+*   [Usage](#usage)
+*   [Contributing](#contributing)
+*   [License](#license)
+
+## Features
+*   **Natural Language to Code**: Describe what you want in plain English, and let 1Q generate the command for you.
+*   **Cross-Platform**: Works on Windows, macOS, and Linux.
+*   **Interactive TUI**: Review, modify, and execute commands in a user-friendly Textual interface.
+*   **Configurable**: Set your preferred output style (auto, tui, inline).
+
+## Installation
+
+```bash
+pip install oneq
+```
+
+## Usage
+
+```bash
+1q [flags] "your query here"
+```
+
+### Flags
+
+```
+usage: 1q [-h] [-k API_KEY] [--show-config-path] [--clear-config]
+          [--set-default-output STYLE] [-v]
+          [query]
+
+positional arguments:
+  query                 The query to convert into a command.
+
+options:
+  -h, --help            show this help message and exit
+  -k API_KEY, --api-key API_KEY
+                        Set the Gemini API key. Overrides config default.
   -v, --version         show program's version number and exit
 
 Configuration and Info Actions:
