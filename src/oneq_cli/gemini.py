@@ -23,53 +23,73 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except FileNotFoundError:
-            pass  # Unable to determine distro
-        context_parts.append(os_name)
+        except:
+            pass # If lsb_release fails, just use "Linux"
+        context_parts.append(f"OS: {os_name}")
     else:
-        context_parts.append(system)
+        context_parts.append(f"OS: {system}")
 
-    shell = os.environ.get("SHELL")
-    if shell:
-        shell_name = os.path.basename(shell)
-        context_parts.append(f"Shell: {shell_name}")
+    shell = os.environ.get("SHELL") or "Unknown"
+    shell_name = os.path.basename(shell)
+    context_parts.append(f"Shell: {shell_name}")
 
     return ", ".join(context_parts)
 
 
-def generate_command(query: str, api_key: str) -> str:
-    """Generates a shell command using the Gemini API."""
+def generate_command(api_key: str, query: str) -> Optional[str]:
+    """Generates a shell command based on the given query using the Gemini API.
+
+    Args:
+        api_key: The Gemini API key.
+        query: The natural language query.
+
+    Returns:
+        The generated shell command, or None if an error occurred.
+    """
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
     platform_context = _get_platform_context()
+
     prompt = f"""
-    You are an expert in generating shell commands and code snippets.  A user will provide a natural language query, and you should respond with a single line containing ONLY the command or code snippet that satisfies the query. Do not include any additional text, explanation, or formatting.
-    The user's operating system and shell is: {platform_context}.
-    If asked to create a file, ensure the command does not include a confirmation prompt.
-    If a command requires a specific tool that is unlikely to be installed by default (e.g., jq, awk), use a command that installs it.
+    You are a command-line assistant. Your goal is to translate a user's natural language query into a shell command that accomplishes their goal.
+    Assume the user is working in a {platform_context}. Only respond with the single shell command that will fulfill the request.
+    Do not include any explanation or conversation.
 
-    Example:
-    User: list files in Documents ending with .pdf
-    Response: find ~/Documents -name "*.pdf"
-
-    User: {query}
-    Response: 
+    User Query: {query}
     """
 
     try:
         response = model.generate_content(prompt)
-        response.resolve()  # Force the future to resolve immediately
-        return response.text.strip()
+        response.resolve() # Force the response to be evaluated immediately
+        return response.text
     except google_exceptions.QuotaExceeded as e:
         raise GeminiApiError(
-            "Gemini API Quota Exceeded: You have exceeded your quota for the Gemini API. Please check your Google Cloud account and quota limits.") from e
-    except google_exceptions.RateLimitExceeded as e:
+            "Gemini API Quota Exceeded: You have exceeded your quota for the Gemini API. Please check your Google Cloud project.") from e
+    except google_exceptions.ServiceUnavailable as e:
         raise GeminiApiError(
-            "Gemini API Rate Limit Exceeded: You are sending requests too quickly. Please reduce the rate at which you are sending requests.") from e
+            "Gemini API Service Unavailable: The Gemini API service is currently unavailable. Please try again later.") from e
+    except google_exceptions.APIConnectionError as e:
+        raise GeminiApiError(
+            "Gemini API Connection Error: Could not connect to the Gemini API. Please check your network connection.") from e
+    except google_exceptions.BadRequest as e:
+        raise GeminiApiError(
+            "Gemini API Bad Request: There was a problem with the request sent to the Gemini API. Please check your query.") from e
+    except google_exceptions.NotFound as e:
+        raise GeminiApiError(
+            "Gemini API Not Found: The requested resource was not found. This could indicate an issue with the API or model name.") from e
+    except google_exceptions.PermissionDenied as e:
+        raise GeminiApiError(
+            "Gemini API Permission Denied: You do not have permission to access the Gemini API. Please check your API key and project settings.") from e
+    except google_exceptions.InternalServerError as e:
+        raise GeminiApiError(
+            "Gemini API Internal Server Error: An internal error occurred in the Gemini API. Please try again later.") from e
+    except google_exceptions.Cancelled as e:
+        raise GeminiApiError(
+            "Gemini API Request Cancelled: The request to the Gemini API was cancelled.") from e
     except google_exceptions.ResourceExhausted as e:
-         raise GeminiApiError(
-            "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+        raise GeminiApiError(
+"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:
