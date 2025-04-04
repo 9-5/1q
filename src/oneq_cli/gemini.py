@@ -23,73 +23,67 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except:
-            pass # If lsb_release fails, just use "Linux"
-        context_parts.append(f"OS: {os_name}")
-    else:
-        context_parts.append(f"OS: {system}")
+        except AttributeError:
+            # Handle cases where freedesktop_os_release() is not available.
+            pass
+        context_parts.append(os_name)
 
-    shell = os.environ.get("SHELL") or "Unknown"
-    shell_name = os.path.basename(shell)
-    context_parts.append(f"Shell: {shell_name}")
+    shell = os.environ.get("SHELL")
+    if shell:
+        shell_name = os.path.basename(shell)
+        context_parts.append(f"Shell: {shell_name}")
 
     return ", ".join(context_parts)
 
 
-def generate_command(api_key: str, query: str) -> Optional[str]:
-    """Generates a shell command based on the given query using the Gemini API.
+def init_gemini(api_key: str) -> None:
+    """Initializes the Gemini API with the provided API key."""
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        raise GeminiApiError(f"Failed to initialize Gemini API: {e}") from e
 
-    Args:
-        api_key: The Gemini API key.
-        query: The natural language query.
 
-    Returns:
-        The generated shell command, or None if an error occurred.
-    """
-    genai.configure(api_key=api_key)
+def generate_command(query: str, platform_context: str) -> Dict[str, Any]:
+    """Generates a command using the Gemini API based on the given query and platform context."""
     model = genai.GenerativeModel(MODEL_NAME)
-
-    platform_context = _get_platform_context()
-
-    prompt = f"""
-    You are a command-line assistant. Your goal is to translate a user's natural language query into a shell command that accomplishes their goal.
-    Assume the user is working in a {platform_context}. Only respond with the single shell command that will fulfill the request.
-    Do not include any explanation or conversation.
-
-    User Query: {query}
+    prompt = f"""You are a command-line assistant. The user will provide a natural language query, and you will respond with a single command that satisfies the query.
+    Consider the user's operating system and shell when generating the command.
+    The user's platform context is: {platform_context}.
+    If the query is ambiguous, ask clarifying questions. If you cannot generate a command, explain why.
+    The command should be runnable directly in the user's shell. Do not include any explanation or other text.
+    Here are some examples:
+    User: list files in Documents ending with .pdf
+    Command: find Documents -name "*.pdf" -print
+    User: create a directory called 'test' in the current directory
+    Command: mkdir test
+    User: search for the string 'hello' in all files in the current directory
+    Command: grep -r "hello" .
+    User: show the first 10 lines of file test.txt
+    Command: head -n 10 test.txt
+    Now, generate the command for the following query:
+    {query}
     """
-
     try:
         response = model.generate_content(prompt)
-        response.resolve() # Force the response to be evaluated immediately
-        return response.text
-    except google_exceptions.QuotaExceeded as e:
-        raise GeminiApiError(
-            "Gemini API Quota Exceeded: You have exceeded your quota for the Gemini API. Please check your Google Cloud project.") from e
+
+        # Extract the command from the response (assuming it's the first part of the text)
+        command = response.text.strip()
+
+        # Basic cleaning: remove any ```bash or ``` type markers from the response
+        command = command.replace("```bash", "").replace("```", "").strip()
+
+        return {"command": command, "response": response.text}
     except google_exceptions.ServiceUnavailable as e:
         raise GeminiApiError(
-            "Gemini API Service Unavailable: The Gemini API service is currently unavailable. Please try again later.") from e
-    except google_exceptions.APIConnectionError as e:
-        raise GeminiApiError(
-            "Gemini API Connection Error: Could not connect to the Gemini API. Please check your network connection.") from e
-    except google_exceptions.BadRequest as e:
-        raise GeminiApiError(
-            "Gemini API Bad Request: There was a problem with the request sent to the Gemini API. Please check your query.") from e
-    except google_exceptions.NotFound as e:
-        raise GeminiApiError(
-            "Gemini API Not Found: The requested resource was not found. This could indicate an issue with the API or model name.") from e
-    except google_exceptions.PermissionDenied as e:
-        raise GeminiApiError(
-            "Gemini API Permission Denied: You do not have permission to access the Gemini API. Please check your API key and project settings.") from e
-    except google_exceptions.InternalServerError as e:
-        raise GeminiApiError(
-            "Gemini API Internal Server Error: An internal error occurred in the Gemini API. Please try again later.") from e
-    except google_exceptions.Cancelled as e:
-        raise GeminiApiError(
-            "Gemini API Request Cancelled: The request to the Gemini API was cancelled.") from e
+            "Gemini API Service Unavailable: Is the service down? "
+            "Check Google Cloud Status page. ({e})") from e
+    except google_exceptions.APIError as e:
+         raise GeminiApiError(
+            f"Gemini API Error: Check your API key and request parameters. ({e})") from e
     except google_exceptions.ResourceExhausted as e:
-        raise GeminiApiError(
-"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+         raise GeminiApiError(
+            f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:

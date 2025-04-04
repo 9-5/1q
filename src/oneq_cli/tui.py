@@ -6,13 +6,12 @@ import re
 from typing import Optional, Union, Dict, Any, Literal, List
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical, VerticalScroll
+from textual.containers import Container, Vertical, VerticalScroll, Horizontal
 from textual.widgets import Header, Footer, Label, Input, Button, Static, Markdown
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label
-from textual.containers import Horizontal
 
 from . import history
 
@@ -24,154 +23,140 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Container {
+    Vertical {
         width: auto;
         height: auto;
-        border: tall $primary 60%;
-        padding: 2;
+        layout: vertical;
+        border: tall $primary 6;
+        padding: 2 4;
     }
     Input { width: 60; }
-    Button { margin-top: 2; width: 100%; }
+    Button { margin-top: 2; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Header(title=self.TITLE,tall=True)
-        yield Container(
-            Label(self.SUB_TITLE),
-            Input(placeholder="Enter your API key", id="api_key_input"),
-            Button("Save API Key", id="save_button", variant="primary"),
+        """Compose the layout of the API Key setup screen."""
+        yield Header()
+        yield Vertical(
+            Label("Please enter your Google AI Studio API key:"),
+            Input(placeholder="Enter API Key Here", id="api_key_input"),
+            Button("Save", id="save_button", variant="primary"),
             Button("Cancel", id="cancel_button"),
         )
         yield Footer()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.control.id == "save_button":
-            api_key = self.query_one("#api_key_input", Input).value
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler for button presses."""
+        button_id = event.button.id
+        if button_id == "save_button":
+            api_key = self.query_one(Input).value
             if api_key:
                 self.exit(api_key)
             else:
-                self.notify("Please enter an API key.", title="Error", severity="error", timeout=3.0)
-        elif event.control.id == "cancel_button":
-            self.exit(None)  # Signal cancellation
+                self.notify("API Key cannot be empty!", title="Error", severity="error")
+        elif button_id == "cancel_button":
+            self.exit(None) # Signal Cancelled
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Event handler for submitting the input field (pressing Enter)."""
+        api_key = event.value
+        if api_key:
+            self.exit(api_key)
+        else:
+            self.notify("API Key cannot be empty!", title="Error", severity="error")
+
+
+def run_api_key_setup() -> Union[str, None]:
+    """Runs the API Key setup TUI and returns the entered API Key, or None if cancelled."""
+    app = ApiKeyApp()
+    api_key = app.run()
+    return api_key
 
 class ResponseAppResult:
-    """Represents the result of the ResponseApp."""
-    def __init__(self, action: str, command_text: Optional[str] = None):
+    """Represents the result of the ResponseApp, including the chosen action and command."""
+    def __init__(self, action: str, command: str):
         self.action = action
-        self.command_text = command_text
-
+        self.command = command
 
 class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the Gemini response and handle user actions."""
-    TITLE = "1Q Response"
-    SUB_TITLE = "Generated Command"
-    CSS_PATH = None
-
+    """Textual app to display the response and handle actions."""
+    CSS_PATH = None # Inline CSS
     CSS = """
     Screen {
         layout: vertical;
     }
-    Header {
+
+    #header {
         dock: top;
+        height: 3;
+        border-bottom: tall $primary;
     }
-    Footer {
+
+    #footer {
         dock: bottom;
+        height: 3;
+        border-top: tall $primary;
     }
-    .body {
+    #body {
         layout: vertical;
-        height: 100%;
-    }
-    .command_panel {
-        height: auto;
-        border: tall $secondary;
-        margin: 1;
         padding: 1;
-    }
-    .button_panel {
-        dock: bottom;
         height: auto;
+        width: 100%;
+        overflow-y: scroll;
+
+    }
+    .horizontal-buttons {
         layout: horizontal;
-        margin: 1;
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
+        align: center middle;
     }
-    Button {
-        width: 1fr;
-        margin: 0 1;
+
+    .button-container {
+        width: auto;
+        height: auto;
+        margin-left: 1;
+        margin-right: 1;
     }
-    Markdown {
-        height: 100%;
-    }
-    .history_panel {
-        border: tall $secondary;
-        margin: 1;
+    #response_text {
+        width: auto;
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
         padding: 1;
+        border: tall $secondary;
+    }
+
+    #command_text {
+        width: auto;
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
+        padding: 1;
+        border: tall $secondary;
+    }
+
+    Button {
+        width: auto;
+    }
+
+    .history-display {
+      border: tall $secondary;
+      padding: 1;
+      margin-top: 1;
+      margin-bottom: 1;
     }
     """
+    TITLE = "1Q Response"
+    SUB_TITLE = "Review and Take Action"
+    BINDINGS = [
+        Binding("ctrl+e", "execute_command", "Execute", show=True),
+        Binding("ctrl+c", "copy_command", "Copy", show=True),
+        Binding("ctrl+m", "modify_command", "Modify", show=True),
+        Binding("ctrl+r", "refine_query", "Refine", show=True),
+        Binding("escape", "quit", "Quit", show=True),
+    ]
 
-    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
-        super().__init__(**kwargs)
-        self.query_text: str = response_data.get("query", "No query provided.")
-        self.command_text: str = response_data.get("command", "No command generated.")
-        self.history: List[Dict[str, str]] = history.load_history() # Load history
-        self.history_index: int = len(self.history) -1 #start at the end of history
-
-    def compose(self) -> ComposeResult:
-        """Compose the TUI layout."""
-        yield Header(title=self.TITLE, show_clock=True)
-        with Container(classes="body"):
-            yield Label(f"Query: {self.query_text}", id="query_label")
-            yield Label("Command:", id="command_header")
-            yield Static(self.command_text, id="command_text", classes="command_panel")
-            with Container(classes="history_panel"):
-                yield Label("History", id="history_header")
-                yield Label(self.get_current_history_entry(), id="history_text")
-            with Container(classes="button_panel"):
-                yield Button("Execute", id="execute_button", variant="primary")
-                yield Button("Copy", id="copy_button")
-                yield Button("Modify", id="modify_button")
-                yield Button("Refine", id="refine_button")
-                yield Button("Prev", id="prev_button")
-                yield Button("Next", id="next_button")
-        yield Footer()
-
-    def get_current_history_entry(self) -> str:
-        if not self.history:
-            return "No history available."
-
-        if not 0 <= self.history_index < len(self.history):
-            return "End of History"
-        
-        entry = self.history[self.history_index]
-        return f"Query: {entry['query']}\nCommand: {entry['command']}"
-    
-    def on_mount(self) -> None:
-        self.update_history_display()
-
-    def update_history_display(self) -> None:
-          """Updates the history display with the current history entry."""
-          history_text = self.query_one("#history_text", Label)
-          history_text.update(self.get_current_history_entry())
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses."""
-        button_id = event.control.id
-
-        if button_id == "execute_button":
-            self.action_execute_command()
-        elif button_id == "copy_button":
-            self.exit(ResponseAppResult("copy", self.command_text))
-        elif button_id == "modify_button":
-            self.action_modify_command()
-        elif button_id == "refine_button":
-            self.action_refine_query()
-        elif button_id == "prev_button":
-            if self.history_index > 0:
-                self.history_index -= 1
-                self.update_history_display()
-        elif button_id == "next_button":
-            if self.history_index < len(self.history) -1:
-                self.history_index += 1
-                self.update_history_display()
-
-    def action_execute_command(self) -> None:
-        """Exits the TUI
+    def __init__(self

@@ -30,73 +30,76 @@ DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto"
 
 console = Console()
 
-def get_config_dir_path() -> Path:
-    """Returns the path to the application's configuration directory."""
-    return Path(user_config_path(APP_NAME, appauthor=False))
-
 def get_config_file_path() -> Path:
     """Returns the path to the configuration file."""
-    return get_config_dir_path() / CONFIG_FILE_NAME
+    return Path(user_config_path(APP_NAME, appauthor=False)) / CONFIG_FILE_NAME
+
 
 def load_config() -> configparser.ConfigParser:
-    """Loads the configuration from the config file."""
+    """Loads the configuration from the config file. Creates a default one if it doesn't exist."""
     config_file = get_config_file_path()
     config = configparser.ConfigParser()
 
     if config_file.exists():
         try:
             config.read(config_file)
-            # Check if the API key exists, and raise an exception if it doesn't.
-            if (CREDENTIALS_SECTION not in config or
-                API_KEY_CONFIG_KEY not in config[CREDENTIALS_SECTION] or
-                not config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]):
-                raise ApiKeyNotFound("Gemini API key not found in configuration.")
-        except Exception as e:
-            raise ConfigurationError(f"Error reading configuration file {config_file}: {e}") from e
+        except configparser.Error as e:
+            raise ConfigurationError(f"Error parsing configuration file {config_file}: {e}") from e
     else:
-        # If the file doesn't exist, treat it as if the API key is missing.
-        raise ApiKeyNotFound("Configuration file not found. Gemini API key is missing.")
+        console.print("No config file found, creating default...", style="yellow")
+        # Create default config structure
+        config[CREDENTIALS_SECTION] = {}
+        config[SETTINGS_SECTION] = {OUTPUT_STYLE_CONFIG_KEY: DEFAULT_OUTPUT_STYLE}  # Set default output style
+        try:
+            _write_config(config) # Create the file.
+        except ConfigurationError:
+            #Don't raise, as the program should still function with a missing config.
+            console.print("Failed to create default config file.", style="red")
+
 
     return config
 
-def save_api_key(api_key: str) -> None:
-    """Saves the Gemini API key to the config file."""
-    config = configparser.ConfigParser()
-    config[CREDENTIALS_SECTION] = {API_KEY_CONFIG_KEY: api_key}
+def get_api_key(config: configparser.ConfigParser) -> str:
+    """Retrieves the Gemini API key from the environment or the config file."""
+    api_key = os.environ.get(API_KEY_ENV_VAR)
+    if not api_key:
+        try:
+            api_key = config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]
+        except KeyError:
+            raise ApiKeyNotFound("Gemini API key not found in environment or config file.")
+    return api_key
 
-    config_file = get_config_file_path()
-    _write_config(config, config_file)
-
-def get_output_style() -> VALID_OUTPUT_STYLES:
-    """Gets the configured output style or returns the default."""
-    config = load_config()
+def get_output_style(config: configparser.ConfigParser) -> VALID_OUTPUT_STYLES:
+    """Retrieves the output style from the config file."""
     try:
-        style = config.get(SETTINGS_SECTION, OUTPUT_STYLE_CONFIG_KEY, fallback=DEFAULT_OUTPUT_STYLE)
-        if style not in get_args(VALID_OUTPUT_STYLES):
-            console.print(f"[yellow]Invalid output style '{style}' in config. Using default.[/yellow]")
+        output_style = config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY]
+        if output_style not in get_args(VALID_OUTPUT_STYLES):
+            console.print(f"[yellow]Warning:[/yellow] Invalid output style '{output_style}' in config file. Falling back to default ('{DEFAULT_OUTPUT_STYLE}').", style="yellow")
             return DEFAULT_OUTPUT_STYLE
-        return style
-    except Exception:
+        return output_style # type: ignore # Safe because of check above
+    except KeyError:
         return DEFAULT_OUTPUT_STYLE
 
-def set_output_style(style: str) -> None:
-    """Sets the default output style in the config file."""
-    if style not in get_args(VALID_OUTPUT_STYLES):
-        raise ValueError(f"Invalid output style: {style}. Must be one of {get_args(VALID_OUTPUT_STYLES)}")
 
-    config = configparser.ConfigParser()
-    config[SETTINGS_SECTION] = {OUTPUT_STYLE_CONFIG_KEY: style}
+def set_config_value(section: str, key: str, value: str) -> None:
+    """Sets a value in the configuration file."""
+    config = load_config()
+    if section not in config:
+        config[section] = {}
+    config[section][key] = value
+    _write_config(config)
 
+def _write_config(config: configparser.ConfigParser) -> None:
+    """Writes the configuration to the config file."""
     config_file = get_config_file_path()
-    _write_config(config, config_file)
-
-def _write_config(config: configparser.ConfigParser, config_file: Path) -> None:
-    """Writes the configparser object to the config file, creating the directory if needed."""
     try:
+        # Ensure the config directory exists
         config_dir = config_file.parent
         config_dir.mkdir(parents=True, exist_ok=True)
+
         with open(config_file, "w") as f:
             config.write(f)
+        console.print(f"Configuration saved to {config_file}", style="green")
     except OSError as e:
         raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
     except Exception as e:
