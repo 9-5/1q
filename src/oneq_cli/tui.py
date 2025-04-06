@@ -23,140 +23,72 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
+
     Vertical {
         width: auto;
         height: auto;
         layout: vertical;
-        border: tall $primary 6;
-        padding: 2 4;
+        border: tall $primary;
+        padding: 2;
     }
-    Input { width: 60; }
-    Button { margin-top: 2; }
+
+    Input {
+        width: auto;
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 2;
+    }
+
+    Button {
+        width: auto;
+    }
     """
 
     def compose(self) -> ComposeResult:
-        """Compose the layout of the API Key setup screen."""
-        yield Header()
-        yield Vertical(
-            Label("Please enter your Google AI Studio API key:"),
-            Input(placeholder="Enter API Key Here", id="api_key_input"),
+        yield Header(title=self.TITLE, subtitle=self.SUB_TITLE)
+        yield Label("Please enter your Google AI Studio API key:")
+        input = Input(placeholder="Enter API Key", id="api_key_input")
+        input.focus()
+        yield input
+        yield Horizontal(
             Button("Save", id="save_button", variant="primary"),
-            Button("Cancel", id="cancel_button"),
+            Button("Cancel", id="cancel_button", variant="default"),
+            width="auto",
         )
         yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Event handler for button presses."""
-        button_id = event.button.id
-        if button_id == "save_button":
-            api_key = self.query_one(Input).value
+        if event.button.id == "save_button":
+            api_key = self.query_one("#api_key_input", Input).value
             if api_key:
                 self.exit(api_key)
             else:
-                self.notify("API Key cannot be empty!", title="Error", severity="error")
-        elif button_id == "cancel_button":
-            self.exit(None) # Signal Cancelled
+                self.query_one("#api_key_input", Input).focus() # Refocus the input if empty
+                self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Event handler for submitting the input field (pressing Enter)."""
-        api_key = event.value
-        if api_key:
-            self.exit(api_key)
-        else:
-            self.notify("API Key cannot be empty!", title="Error", severity="error")
+        elif event.button.id == "cancel_button":
+            self.exit(None)
 
-
-def run_api_key_setup() -> Union[str, None]:
-    """Runs the API Key setup TUI and returns the entered API Key, or None if cancelled."""
+def run_api_key_setup() -> Optional[str]:
+    """Runs the ApiKeyApp and returns the API key or None if cancelled."""
     app = ApiKeyApp()
     api_key = app.run()
     return api_key
 
-class ResponseAppResult:
-    """Represents the result of the ResponseApp, including the chosen action and command."""
-    def __init__(self, action: str, command: str):
-        self.action = action
-        self.command = command
+ResponseAppResult = Optional[Literal["execute", "copy", "modify", "refine"]]
 
 class ResponseApp(App[ResponseAppResult]):
-    """Textual app to display the response and handle actions."""
+    """
+    TUI App to display the response and available actions.
+    """
     CSS_PATH = None # Inline CSS
     CSS = """
     Screen {
         layout: vertical;
     }
 
-    #header {
-        dock: top;
-        height: 3;
-        border-bottom: tall $primary;
-    }
-
-    #footer {
-        dock: bottom;
-        height: 3;
-        border-top: tall $primary;
-    }
-    #body {
-        layout: vertical;
-        padding: 1;
-        height: auto;
-        width: 100%;
-        overflow-y: scroll;
-
-    }
-    .horizontal-buttons {
-        layout: horizontal;
-        width: 100%;
-        height: auto;
-        margin-top: 1;
-        margin-bottom: 1;
-        align: center middle;
-    }
-
-    .button-container {
+    Container {
+        align: center top;
         width: auto;
         height: auto;
-        margin-left: 1;
-        margin-right: 1;
-    }
-    #response_text {
-        width: auto;
-        height: auto;
-        margin-top: 1;
-        margin-bottom: 1;
-        padding: 1;
-        border: tall $secondary;
-    }
-
-    #command_text {
-        width: auto;
-        height: auto;
-        margin-top: 1;
-        margin-bottom: 1;
-        padding: 1;
-        border: tall $secondary;
-    }
-
-    Button {
-        width: auto;
-    }
-
-    .history-display {
-      border: tall $secondary;
-      padding: 1;
-      margin-top: 1;
-      margin-bottom: 1;
-    }
-    """
-    TITLE = "1Q Response"
-    SUB_TITLE = "Review and Take Action"
-    BINDINGS = [
-        Binding("ctrl+e", "execute_command", "Execute", show=True),
-        Binding("ctrl+c", "copy_command", "Copy", show=True),
-        Binding("ctrl+m", "modify_command", "Modify", show=True),
-        Binding("ctrl+r", "refine_query", "Refine", show=True),
-        Binding("escape", "quit", "Quit", show=True),
-    ]
-
-    def __init__(self
+        margin: 1;

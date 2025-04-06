@@ -26,15 +26,25 @@ def load_history() -> List[Dict[str, str]]:
     try:
         with open(history_file, "r") as f:
             history = json.load(f)
-            return history
+        return history
     except FileNotFoundError:
-        return []  # Handle case where history file doesn't exist
+        return []  # Handle case where history file doesn't exist yet
     except json.JSONDecodeError:
-        print("Error decoding history file.  Returning empty history.")
-        return [] # Handle corrupted history file
-    except Exception as e:
-        print(f"Error loading history: {e}")
-        return []
+        print("Warning: History file is corrupt.  Returning empty history.") # Using print here as console might not be available.
+        return [] # Handle potential JSON decode errors
+
+def clear_history_file() -> None:
+     """Clears the history file by deleting it."""
+     history_file = get_history_file_path()
+     if history_file.exists():
+          try:
+               os.remove(history_file)
+               print("History file cleared.") # Using print here as console might not be available.
+          except OSError as e:
+               print(f"Error clearing history file: {e}") # Using print here as console might not be available.
+     else:
+          print("History file does not exist. Nothing to clear.") # Using print here as console might not be available.
+
 
 def save_history(query: str, command: str) -> None:
   """Saves a query and its corresponding command to the history file."""

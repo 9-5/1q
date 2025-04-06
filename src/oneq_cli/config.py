@@ -26,17 +26,23 @@ SETTINGS_SECTION = "Settings"
 OUTPUT_STYLE_CONFIG_KEY = "output_style"
 
 VALID_OUTPUT_STYLES = Literal["auto", "tui", "inline"]
-DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto"
+DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto" # type: ignore
 
 console = Console()
 
 def get_config_file_path() -> Path:
-    """Returns the path to the configuration file."""
+    """Returns the path to the application's configuration file."""
     return Path(user_config_path(APP_NAME, appauthor=False)) / CONFIG_FILE_NAME
 
+def create_default_config() -> configparser.ConfigParser:
+    """Creates a ConfigParser instance with default values."""
+    config = configparser.ConfigParser()
+    config[CREDENTIALS_SECTION] = {API_KEY_CONFIG_KEY: ""}
+    config[SETTINGS_SECTION] = {OUTPUT_STYLE_CONFIG_KEY: DEFAULT_OUTPUT_STYLE}
+    return config
 
-def load_config() -> configparser.ConfigParser:
-    """Loads the configuration from the config file. Creates a default one if it doesn't exist."""
+def get_config() -> configparser.ConfigParser:
+    """Retrieves the application's configuration."""
     config_file = get_config_file_path()
     config = configparser.ConfigParser()
 
@@ -46,51 +52,61 @@ def load_config() -> configparser.ConfigParser:
         except configparser.Error as e:
             raise ConfigurationError(f"Error parsing configuration file {config_file}: {e}") from e
     else:
-        console.print("No config file found, creating default...", style="yellow")
-        # Create default config structure
-        config[CREDENTIALS_SECTION] = {}
-        config[SETTINGS_SECTION] = {OUTPUT_STYLE_CONFIG_KEY: DEFAULT_OUTPUT_STYLE}  # Set default output style
-        try:
-            _write_config(config) # Create the file.
-        except ConfigurationError:
-            #Don't raise, as the program should still function with a missing config.
-            console.print("Failed to create default config file.", style="red")
-
+        config = create_default_config()
+        write_config(config) # Create the config file with defaults.
 
     return config
 
-def get_api_key(config: configparser.ConfigParser) -> str:
-    """Retrieves the Gemini API key from the environment or the config file."""
+def get_gemini_api_key() -> str:
+    """Retrieves the Gemini API key from the environment or configuration file."""
+    # 1. Check environment variable
     api_key = os.environ.get(API_KEY_ENV_VAR)
-    if not api_key:
-        try:
-            api_key = config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]
-        except KeyError:
-            raise ApiKeyNotFound("Gemini API key not found in environment or config file.")
-    return api_key
+    if api_key:
+        return api_key
 
-def get_output_style(config: configparser.ConfigParser) -> VALID_OUTPUT_STYLES:
-    """Retrieves the output style from the config file."""
+    # 2. Check configuration file
+    config = get_config()
     try:
-        output_style = config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY]
-        if output_style not in get_args(VALID_OUTPUT_STYLES):
-            console.print(f"[yellow]Warning:[/yellow] Invalid output style '{output_style}' in config file. Falling back to default ('{DEFAULT_OUTPUT_STYLE}').", style="yellow")
-            return DEFAULT_OUTPUT_STYLE
-        return output_style # type: ignore # Safe because of check above
-    except KeyError:
-        return DEFAULT_OUTPUT_STYLE
+        api_key = config.get(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY)
+        if api_key:
+            return api_key
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        pass  # Handle cases where the section or key doesn't exist
 
+    # 3. If not found, raise an exception
+    raise ApiKeyNotFound("Gemini API key not found. Please set the GEMINI_API_KEY environment variable or configure it via the TUI.")
+
+def save_gemini_api_key(api_key: str) -> None:
+    """Saves the Gemini API key to the configuration file."""
+    config = get_config()
+    if not config.has_section(CREDENTIALS_SECTION):
+        config.add_section(CREDENTIALS_SECTION)
+    config.set(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY, api_key)
+    write_config(config)
+
+def get_output_style() -> VALID_OUTPUT_STYLES:
+    """Retrieves the configured output style."""
+    config = get_config()
+    try:
+        output_style = config.get(SETTINGS_SECTION, OUTPUT_STYLE_CONFIG_KEY, fallback=DEFAULT_OUTPUT_STYLE)
+        if output_style in get_args(VALID_OUTPUT_STYLES):
+            return output_style # type: ignore
+        else:
+            console.print(f"[yellow]Warning:[/yellow] Invalid output style '{output_style}' in config file.  Falling back to default ('{DEFAULT_OUTPUT_STYLE}').", style="yellow")
+            return DEFAULT_OUTPUT_STYLE # type: ignore
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        return DEFAULT_OUTPUT_STYLE # type: ignore
 
 def set_config_value(section: str, key: str, value: str) -> None:
-    """Sets a value in the configuration file."""
-    config = load_config()
-    if section not in config:
-        config[section] = {}
-    config[section][key] = value
-    _write_config(config)
+     """Sets a configuration value in the specified section."""
+     config = get_config()
+     if not config.has_section(section):
+          config.add_section(section)
+     config.set(section, key, value)
+     write_config(config)
 
-def _write_config(config: configparser.ConfigParser) -> None:
-    """Writes the configuration to the config file."""
+def write_config(config: configparser.ConfigParser) -> None:
+    """Writes the configuration to the configuration file."""
     config_file = get_config_file_path()
     try:
         # Ensure the config directory exists
@@ -99,7 +115,6 @@ def _write_config(config: configparser.ConfigParser) -> None:
 
         with open(config_file, "w") as f:
             config.write(f)
-        console.print(f"Configuration saved to {config_file}", style="green")
     except OSError as e:
         raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
     except Exception as e:
