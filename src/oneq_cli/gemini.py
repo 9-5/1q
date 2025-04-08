@@ -23,59 +23,62 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except Exception:
-            pass  # Unable to determine the specific distribution.
+        except:
+            pass  # Ignore errors getting distro info
         context_parts.append(os_name)
+    else:
+        context_parts.append(system)
 
     shell = os.environ.get("SHELL")
     if shell:
         shell_name = os.path.basename(shell)
         context_parts.append(f"Shell: {shell_name}")
 
+    python_version = platform.python_version()
+    context_parts.append(f"Python {python_version}")
+
     return ", ".join(context_parts)
 
 
-def generate_command(query: str, api_key: str) -> str:
-    """Generates a shell command from a natural language query using the Gemini API."""
+def generate_command(api_key: str, query: str) -> Optional[str]:
+    """
+    Generates a shell command or code snippet using the Gemini API.
+
+    Args:
+        api_key: The Gemini API key.
+        query: The natural language query.
+
+    Returns:
+        The generated command as a string, or None if an error occurred.
+    """
     genai.configure(api_key=api_key)
+
     model = genai.GenerativeModel(MODEL_NAME)
 
     platform_context = _get_platform_context()
+
     prompt = f"""
-    You are a helpful AI assistant that translates user requests into shell commands.
-    Your responses should be concise and executable in a terminal.
+    You are a helpful AI assistant that translates natural language into shell commands, command chains, and code snippets.
+    You should generate commands that are most likely to work and are the most efficient.
+    Consider the user's platform when generating commands. Current platform context: {platform_context}
 
-    Here's the user's request: {query}
-
-    Platform Context: {platform_context}
-
-    Return ONLY the shell command. Do not include any explanation or other text.
+    User Query: {query}
     """
 
     try:
         response = model.generate_content(prompt)
-        response.resolve() # Raise an exception if the response is blocked
-        return response.text.strip()
-    except google_exceptions.QuotaExceeded as e:
-        raise GeminiApiError(f"Gemini API Quota Exceeded: You have exceeded your API quota. ({e})") from e
-    except google_exceptions.ServiceUnavailable as e:
-        raise GeminiApiError("Gemini API Service Unavailable: The service is currently unavailable. Please try again later.") from e
-    except google_exceptions.APIError as e:
-        raise GeminiApiError(
-            f"Gemini API Error: There was an API error. Status code: {e.code}, message: {e.message}"
-        ) from e
-    except google_exceptions.InternalServerError as e:
-        raise GeminiApiError("Gemini API Internal Server Error: An internal server error occurred. Please try again later.") from e
-    except google_exceptions.BadGateway as e:
-        raise GeminiApiError("Gemini API Bad Gateway: There was a bad gateway error. Please try again later.") from e
-    except google_exceptions.DeadlineExceeded as e:
-        raise GeminiApiError("Gemini API Deadline Exceeded: The request timed out. Please try again later.") from e
-    except google_exceptions.NotFound as e:
-        raise GeminiApiError(f"Gemini API Resource Not Found: The requested resource was not found. ({e})") from e
+        if response and hasattr(response, "text"):
+            return response.text.strip()
+        else:
+            console.print(f"Unexpected response structure: {response}", style="red")
+            return None
+    except google_exceptions.InvalidArgument as e:
+        raise GeminiApiError(f"Gemini API Invalid Argument: Check your prompt or API key. ({e})") from e
     except google_exceptions.PermissionDenied as e:
-        raise GeminiApiError(f"Gemini API Permission Denied: You do not have permission to access this resource. ({e})") from e
-    except google_exceptions.ResourceExhausted as e:
-         raise GeminiApiError(
+        raise GeminiApiError(
+            "Gemini API Permission Denied: Ensure the API is enabled and you have the correct permissions.") from e
+    except google_exceptions.QuotaExceeded as e:
+        raise GeminiApiError(
             "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e

@@ -27,44 +27,42 @@ class ApiKeyApp(App[Union[str, None]]):
     Vertical {
         width: auto;
         height: auto;
-        layout: vertical;
         border: tall $primary;
-        padding: 2;
+        padding: 1;
     }
 
     Input {
-        width: auto;
-        height: auto;
-        margin-top: 1;
-        margin-bottom: 2;
+        width: 60;
+        margin-bottom: 1;
     }
 
     Button {
-        width: auto;
+        width: 20;
     }
     """
 
     def compose(self) -> ComposeResult:
-        yield Header(title=self.TITLE, subtitle=self.SUB_TITLE)
-        yield Label("Please enter your Google AI Studio API key:")
-        input = Input(placeholder="Enter API Key", id="api_key_input")
-        input.focus()
-        yield input
-        yield Horizontal(
-            Button("Save", id="save_button", variant="primary"),
-            Button("Cancel", id="cancel_button", variant="default"),
-            width="auto",
-        )
+        """Compose our UI."""
+        yield Header(title=self.TITLE, show_clock=True)
         yield Footer()
+        with Vertical():
+            yield Label(self.SUB_TITLE)
+            api_key_input = Input(placeholder="Paste your API Key here", id="api_key_input")
+            api_key_input.focus()
+            yield api_key_input
+            with Horizontal():
+                yield Button("Save", id="save_button", variant="primary")
+                yield Button("Cancel", id="cancel_button", variant="default")
+
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler called when a button is pressed."""
         if event.button.id == "save_button":
-            api_key = self.query_one("#api_key_input", Input).value
+            api_key = self.query_one("#api_key_input", Input).value.strip()
             if api_key:
                 self.exit(api_key)
             else:
-                self.query_one("#api_key_input", Input).focus() # Refocus the input if empty
-                self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
+                 self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
 
         elif event.button.id == "cancel_button":
             self.exit(None)
@@ -92,3 +90,66 @@ class ResponseApp(App[ResponseAppResult]):
         width: auto;
         height: auto;
         margin: 1;
+    }
+
+    Markdown {
+        width: auto;
+        height: auto;
+        margin: 1;
+        border: round $primary;
+        padding: 1;
+    }
+
+    Horizontal {
+        width: auto;
+        height: auto;
+        margin: 1;
+    }
+
+    Button {
+        width: 16;
+        margin: 1;
+    }
+    """
+
+    def __init__(self, response_data: Dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.response_data = response_data
+        self.query_text = response_data.get("query", "No query provided.")
+        self.command_text = response_data.get("command", "No command generated.")
+
+    def compose(self) -> ComposeResult:
+        """Compose our UI."""
+        yield Header(title="1Q Response", show_clock=True)
+        yield Footer()
+        with Container():
+            yield Label("[bold]Query:[/bold]")
+            yield Markdown(f"```text\n{self.query_text}\n```")
+            yield Label("[bold]Command:[/bold]")
+            yield Markdown(f"```bash\n{self.command_text}\n```")
+
+            with Horizontal():
+                yield Button("Execute", id="execute_button", variant="primary")
+                yield Button("Copy", id="copy_button", variant="primary")
+                yield Button("Modify", id="modify_button", variant="default")
+                yield Button("Refine Query", id="refine_button", variant="default")
+
+
+    async def on_mount(self) -> None:
+        """Save the interaction to history after the TUI is mounted."""
+        history.save_history(self.query_text, self.command_text) # Save to history
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler called when a button is pressed."""
+
+        if event.button.id == "copy_button":
+            self.exit("copy")
+
+        elif event.button.id == "execute_button":
+         if not self.command_text:
+             self.notify("No command to execute.", title="Execution Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("execute")
+
+    def action_modify_command(self) -> None:
+        """Exits the TUI signalling to
