@@ -12,53 +12,9 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 ## Table of Contents
 
 *   [Features](#features)
-*   [Installation](#installation)
-*   [Usage](#usage)
-*   [Configuration](#configuration)
-*   [Contributing](#contributing)
-*   [License](#license)
-
-## Features
-
-*   **Natural Language to Code**: Describe what you want to do in plain English, and `1q` will generate the corresponding shell command or code snippet.
-*   **Cross-Platform**: Works on macOS, Linux, and Windows.
-*   **Interactive TUI**: Review, execute, or modify generated commands in an intuitive terminal user interface.
-*   **Configurable**: Customize the output style and other settings to fit your needs.
-*   **History**: Track previously successful commands
-
-## Installation
-
-```bash
-pip install oneq
-```
-
-## Usage
-
-```bash
-1q [your query here]
-```
-
-For example:
-
-```bash
-1q list files in Documents ending with .pdf
-```
-
-### Command-Line Options
-
-```
-usage: 1q [-h] [-o {auto,tui,inline}] [--show-config-path] [--clear-config]
-          [--set-default-output STYLE] [-v] [query]
-
-1Q - The right one-liner is just one query away.
-
-positional arguments:
-  query                 The query to resolve into a command.
-
-options:
-  -h, --help            show this help message and exit
-  -o {auto,tui,inline}, --output {auto,tui,inline}
-                        Output style (auto, tui, inline). Overrides config default.
+*   [In
+... (FILE CONTENT TRUNCATED) ...
+ig default.
   -v, --version         show program's version number and exit
 
 Configuration and Info Actions:
