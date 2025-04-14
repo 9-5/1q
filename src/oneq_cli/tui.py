@@ -14,6 +14,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label
 
 from . import history
+from ..oneq_cli import cli
+
+ResponseAppResult = Optional[Literal["execute", "modify", "refine", "copy"]]
 
 class ApiKeyApp(App[Union[str, None]]):
     """TUI App to prompt for the Gemini API Key."""
@@ -31,89 +34,64 @@ class ApiKeyApp(App[Union[str, None]]):
     def compose(self) -> ComposeResult:
         yield Header(title=self.TITLE, subtitle=self.SUB_TITLE)
         with Vertical():
-            input = Input(placeholder="Your API Key", password=True)
-            input.focus()
-            yield input
-            yield Button("Save", id="save")
-            yield Button("Cancel", id="cancel")
+            yield Label("API Key:")
+            api_key_input = Input(placeholder="Paste your API key here", id="api-key-input")
+            api_key_input.focus()
+            yield Button("Save", id="save-api-key", variant="primary")
+            yield Button("Cancel", id="cancel-api-key")
         yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save":
-            api_key = self.query_one(Input).value.strip()
-            if api_key:
-                self.exit(api_key)
-            else:
-                self.notify("API Key cannot be empty.", title="Error", severity="error", timeout=3.0)
-        else:
-            self.exit(None) # Signal cancelled
-
-
-def ask_for_api_key() -> Union[str, None]:
-    """Runs the ApiKeyApp and returns the entered API key or None if cancelled."""
-    app = ApiKeyApp()
-    return app.run()
-
-ResponseAppResult = Union[Literal["execute"], Literal["modify"], Literal["refine"]]
-
-class HistoryScreen(ModalScreen):
-    """A popup screen to display command history."""
-
-    def __init__(self, history_data: List[Dict[str, str]], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
-        super().__init__(name=name, id=id, classes=classes)
-        self.history_data = history_data
-
-    def compose(self) -> ComposeResult:
-        yield Header(title="Command History",tall=False)
-        history_text = ""
-        for item in self.history_data:
-            history_text += f"* **Query:** {item['query']}\n"
-            history_text += f"  **Command:** {item['command']}\n\n"
-        yield Markdown(history_text)
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self.query_one(Markdown).scroll_visible() # Scroll to top.
-        self.set_focus(self.query_one(Markdown))
+        if event.control.id == "cancel-api-key":
+            self.exit(None)
+        elif event.control.id == "save-api-key":
+            api_key = self.query_one("#api-key-input", Input).value
+            # Basic validation (can add more sophisticated checks)
+            if not api_key:
+                self.notify("API Key cannot be empty.", title="Validation Error", severity="error", timeout=3.0)
+                return
+            self.exit(api_key)
 
 
 class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the command and explanation, with action choices."""
-    TITLE = "1Q Response"
-    SUB_TITLE = "Review, Execute, or Modify"
-    CSS_PATH = None
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
+    """TUI App to display the response and options."""
 
+    TITLE = "1Q Response"
+    SUB_TITLE = "Review and take action"
+    CSS_PATH = None # Inline CSS
+
+    CSS = """
     #response-container {
-        height: 70%;
-        border: tall $panel;
+        layout: vertical;
+        width: auto;
+        height: auto;
         margin: 1;
         padding: 1;
+        border: round $primary;
     }
 
     #query-label {
         margin-bottom: 1;
     }
 
-    #explanation-markdown {
-        margin-top: 1;
+    #command-label {
+        margin-bottom: 1;
     }
 
-
-    Footer {
-        dock: bottom;
+    #explanation-markdown {
+        margin-bottom: 1;
     }
 
     Button {
         width: 100%;
+        margin-bottom: 1;
     }
+
     """
 
-    def __init__(self, response_data: Dict[str, Any], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
-        super().__init__(name=name, id=id, classes=classes)
+    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
+        super().__init__(**kwargs)
+        # Extract data, providing defaults
         self.query_text: str = response_data.get("query", "")
         self.command_text: str = response_data.get("command", "")
         self.explanation_text: str = response_data.get("explanation", "")
@@ -127,6 +105,58 @@ class ResponseApp(App[ResponseAppResult]):
             yield Markdown(f"[bold]Explanation:[/]\n{self.explanation_text}", id="explanation-markdown")
 
         yield Button("Execute Command", id="execute")
+        yield Button("Copy Command", id="copy")
         yield Button("Modify Command", id="modify")
         yield Button("Refine Query", id="refine")
-        yield Button("View History", id
+        yield Footer()
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler called when a button is pressed."""
+        button_id = event.control.id
+
+        if button_id == "execute":
+            self.action_execute_command()
+        elif button_id == "modify":
+            self.action_modify_command()
+        elif button_id == "refine":
+            self.action_refine_query()
+        elif button_id == "copy":
+            self.action_copy_command()
+
+    def action_copy_command(self) -> None:
+        """Copies the command to the clipboard."""
+        if not self.command_text:
+            self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
+            return
+
+        if cli.copy_to_clipboard(self.command_text):
+            self.exit("copy")  # Signal copy was successful.
+        else:
+            # copy_to_clipboard handles the notification on failure, so no need to repeat it here.
+            pass
+
+
+    def action_execute_command(self) -> None:
+        """Exits the TUI signalling to execute the command."""
+        if not self.command_text:
+             self.notify("No command to execute.", title="Execution Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("execute")
+
+    def action_modify_command(self) -> None:
+        """Exits the TUI signalling to modify the command."""
+        if not self.command_text:
+             self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("modify")
+
+    def action_refine_query(self) -> None:
+        """Exits the TUI signalling to refine the query."""
+        self.exit("refine")
+
+
+def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
+    """Runs the ResponseApp and returns the chosen action."""
+    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
+    result = app.run()
+    return result
