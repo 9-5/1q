@@ -24,8 +24,11 @@ def _get_platform_context() -> str:
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
         except:
-            pass  # Ignore errors getting distro info
-        context_parts.append(f"Operating System: {os_name}")
+            pass  # Unable to determine distro.
+
+        context_parts.append(os_name)
+    else:
+        context_parts.append(system)
 
     shell = os.environ.get("SHELL")
     if shell:
@@ -34,43 +37,28 @@ def _get_platform_context() -> str:
 
     return ", ".join(context_parts)
 
-def generate_command(api_key: str, query: str) -> Optional[Dict[str, Any]]:
-    """Generates a shell command using the Gemini API.
 
-    Returns:
-        A dictionary containing the 'command' and 'explanation', or None on failure.
-    Raises:
-        GeminiApiError: If there's an error communicating with the Gemini API.
+def generate_command(prompt: str, api_key: str) -> str:
+    """
+    Generates a shell command using the Gemini API.
     """
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
+
     platform_context = _get_platform_context()
-    prompt = f"""
-    You are a command-line expert.  A user will describe what they want to do, and you will generate a single command to do it.
-    The command should be as short as possible.
-    Include a brief explanation of what the command does.
-    The response must be in JSON format, with the following keys: "command" and "explanation".
-    Example:
-    User: list files in Documents ending with .pdf
-    Response: {{"command": "ls ~/Documents/*.pdf", "explanation": "Lists all files ending in .pdf in the Documents directory."}}
-    User: {query}
+    augmented_prompt = f"""
+    Generate a shell command (or chain of commands using &&) that satisfies the user's request.
+    The user's operating system and shell is: {platform_context}.
+    If the request cannot be satisfied with a single command or chain of commands, respond with an error message.
+    If the request is ambiguous, ask for clarification.
+    The user's request is: {prompt}
     """
 
     try:
-        response = model.generate_content(prompt)
-        response.resolve()  # Ensure the response is fully populated
-        response_text = response.text
-        try:
-            import json
-            # Attempt to parse the response as JSON
-            response_json = json.loads(response_text)
-            return response_json
-        except json.JSONDecodeError as e:
-            console.print(f"[red]JSON Decode Error: {e}[/]", style="red")
-            console.print(f"[red]Raw Response Text: {response_text}[/]", style="red")  # Print the raw response
-            raise GeminiApiError(f"Could not decode Gemini API response as JSON: {e}. Raw response printed above.") from e
-    except google_exceptions.InvalidArgument as e:
-        raise GeminiApiError(f"Gemini API Invalid Argument: Check your prompt or API key. ({e})") from e
+        response = model.generate_content(augmented_prompt)
+        return response.text.strip()
+    except google_exceptions.PermissionDenied as e:
+        raise GeminiApiError("Gemini API Permission Denied: Ensure the API is enabled and the API key is valid.") from e
     except google_exceptions.QuotaExceeded as e:
          raise GeminiApiError(f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
