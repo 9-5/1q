@@ -23,12 +23,9 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except:
-            pass  # Unable to determine distro.
-
+        except AttributeError:
+            pass  # Handle cases where freedesktop_os_release is not available (older Python versions)
         context_parts.append(os_name)
-    else:
-        context_parts.append(system)
 
     shell = os.environ.get("SHELL")
     if shell:
@@ -38,29 +35,41 @@ def _get_platform_context() -> str:
     return ", ".join(context_parts)
 
 
-def generate_command(prompt: str, api_key: str) -> str:
+def generate_command(api_key: str, query: str) -> Dict[str, str]:
     """
-    Generates a shell command using the Gemini API.
+    Generates a shell command using the Gemini API based on the given query.
+
+    Args:
+        api_key (str): The Gemini API key.
+        query (str): The query to generate a command for.
+
+    Returns:
+        Dict[str, str]: A dictionary containing the generated command (or an empty string if generation fails) and any relevant metadata.
     """
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
     platform_context = _get_platform_context()
-    augmented_prompt = f"""
-    Generate a shell command (or chain of commands using &&) that satisfies the user's request.
-    The user's operating system and shell is: {platform_context}.
-    If the request cannot be satisfied with a single command or chain of commands, respond with an error message.
-    If the request is ambiguous, ask for clarification.
-    The user's request is: {prompt}
-    """
 
+    prompt = f"""
+    You are a command-line assistant.  The user will provide a plain text query, and you should respond with a single line containing a shell command that satisfies the query.
+    Do not include any explanation or other text.  Only provide the command.
+    The user's operating system and shell is: {platform_context}.
+    If the query is unanswerable using command-line tools, respond with an empty string.
+
+    Query: {query}
+    """
     try:
-        response = model.generate_content(augmented_prompt)
-        return response.text.strip()
-    except google_exceptions.PermissionDenied as e:
-        raise GeminiApiError("Gemini API Permission Denied: Ensure the API is enabled and the API key is valid.") from e
+        response = model.generate_content(prompt)
+        response.resolve()  # Ensure the response is fully populated
+        command = response.text.strip()
+        return {"command": command}
     except google_exceptions.QuotaExceeded as e:
-         raise GeminiApiError(f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+        raise GeminiApiError(
+            "Gemini API Quota Exceeded: You have exceeded your quota for the Gemini API.  Please check your Google Cloud project for quota details.") from e
+    except google_exceptions.ResourceExhausted as e:
+        raise GeminiApiError(
+            "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:

@@ -26,74 +26,105 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Vertical { width: auto; height: auto; border: tall $primary; padding: 2; }
+    Container {
+        width: auto;
+        height: auto;
+        border: tall $primary;
+        padding: 2 4;
+    }
     Input { width: 60; }
-    Button { margin-top: 2; width: 100%; }
+    Button { margin-top: 2; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical():
-            yield Label("Please enter your Google AI Studio API key:")
-            api_key_input = Input(placeholder="Paste API Key here", id="api_key_input")
+        """Create child widgets for the API key entry screen."""
+        yield Header(title=self.TITLE, show_clock=True)
+        with Container():
+            yield Label(self.SUB_TITLE)
+            api_key_input = Input(placeholder="Enter your API key here", id="api_key_input", password=True)
+            api_key_input.focus()
             yield api_key_input
             yield Button("Save API Key", id="save_api_key", variant="primary")
+            yield Button("Cancel", id="cancel", variant="default")
         yield Footer()
 
-
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save_api_key":
+        """Event handler for button presses."""
+        button_id = event.button.id
+        if button_id == "save_api_key":
             api_key = self.query_one("#api_key_input", Input).value
             if api_key:
-                self.exit(api_key)
+                # Save the API key (implementation in config.py)
+                config_manager = cli.config.ConfigManager()
+                config_manager.config[cli.config.CREDENTIALS_SECTION][cli.config.API_KEY_CONFIG_KEY] = api_key
+                try:
+                    config_manager.save_config()
+                    self.app.exit(api_key)  # Return the API key
+                except cli.config.ConfigurationError as e:
+                    self.app.exit(None) # Signal failure
+                    self.app.notify(f"Failed to save API Key: {e}", title="Error", severity="error")
             else:
-                self.notify("API Key cannot be empty.", title="Error", severity="error", timeout=3.0)
+                self.app.notify("API Key cannot be empty!", title="Warning", severity="warning")
+
+        elif button_id == "cancel":
+            self.app.exit(None)  # Signal cancellation
+
+
+def run_api_key_setup() -> Optional[str]:
+    """Runs the API Key setup TUI and returns the entered key or None if cancelled."""
+    app = ApiKeyApp()
+    api_key = app.run()
+    return api_key
 
 
 class HistoryApp(App[Optional[Dict[str, str]]]):
-    """A Textual app to display and select from command history."""
+    """A modal app to display command history."""
 
     CSS = """
     #history-list {
-        width: 100%;
         height: 100%;
     }
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self.history_items: List[Dict[str, str]] = history.load_history()
-
     def compose(self) -> ComposeResult:
-        yield Header(title="Command History")
-        history_list = ListView(id="history-list")
+        """Compose the history modal view."""
+        history_data = history.load_history()
+        list_items: List[ListItem] = []
 
-        for item in self.history_items:
-            history_list.append(ListItem(Label(item["query"]), id=item["query"]))
+        for item in history_data:
+            query = item.get("query", "No query")
+            command = item.get("command", "No command")
+            list_items.append(ListItem(Label(f"[bold]{query}[/]\n[dim]{command}[/]", markup=True)))
 
-        yield history_list
-        yield Footer()
+        history_list = ListView(*list_items, id="history-list")
+        yield Container(history_list)
 
     async def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """Called when the user clicks a list item."""
-        selected_query = event.item.id
-        selected_item = next((item for item in self.history_items if item["query"] == selected_query), None)
-        self.exit(selected_item)
+        """Handle when an item is selected."""
+        list_view = event.list_view
+        selected_item = event.item
+
+        # Find the index of the selected item
+        item_index = list_view.children.index(selected_item)
+        history_data = history.load_history()
+
+        if 0 <= item_index < len(history_data):
+            self.app.exit(history_data[item_index])
+        else:
+            self.app.exit(None)
+            self.app.notify("Invalid history item selected.", title="Error", severity="error")
+
 
 class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the response and allow actions."""
-
-    CSS_PATH = None
+    """The main TUI app to display the command and handle actions."""
+    CSS_PATH = None # Inline CSS
     CSS = """
-    Screen {
-        layout: vertical;
-    }
-
     #header {
         dock: top;
         height: 3;
         border-bottom: tall $primary;
     }
+
     #footer {
         dock: bottom;
         height: 3;
@@ -102,39 +133,43 @@ class ResponseApp(App[ResponseAppResult]):
 
     #content {
         layout: horizontal;
-        height: auto;
-        width: 100%;
     }
-    #query_box {
+
+    #query_box, #command_box {
         width: 50%;
-        border-right: tall $secondary;
+        height: 100%;
         padding: 1;
+        border: tall $secondary;
     }
 
-    #command_box {
-        width: 50%;
-        padding: 1;
+    Vertical {
+        width: 1fr;
+        height: 1fr;
     }
-
-    Button {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
     """
 
     BINDINGS = [
+        Binding("c", "copy_command", "Copy", show=True),
         Binding("e", "execute_command", "Execute", show=True),
         Binding("m", "modify_command", "Modify", show=True),
         Binding("r", "refine_query", "Refine", show=True),
-        Binding("c", "copy_command", "Copy", show=True),
         Binding("h", "show_history", "History", show=True),
+        Binding("q", "quit", "Quit", show=True),
     ]
 
-    def __init__(self, response_data: Dict[str, Any], *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self.query_text: str = response_data.get("query", "No query provided.")
-        self.command_text: str = response_data.get("command", "No command generated.")
+    def __init__(self, response_data: Dict[str, Any], **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.query_text: Optional[str] = response_data.get("query")
+        self.command_text: Optional[str] = response_data.get("command")
+        self.action_taken: Optional[ResponseAppResult] = None # None, "execute", "modify", "refine"
+
+
+    def on_mount(self) -> None:
+        """Call after terminal is ready."""
+        if not self.query_text:
+            self.notify("No query received.", title="Missing Info", severity="warning", timeout=3.0)
+        if not self.command_text:
+            self.notify("No command generated.", title="Missing Info", severity="warning", timeout=3.0)
 
 
     def compose(self) -> ComposeResult:
@@ -149,8 +184,34 @@ class ResponseApp(App[ResponseAppResult]):
                 yield Markdown(self.command_text or "No command generated.")
         yield Footer()
 
-
     async def action_show_history(self) -> None:
         """Show command history in a modal dialog."""
         history_app = HistoryApp()
-        selected_item = await self.view.dock_screen
+        selected_item = await self.view.dock_screen(history_app)
+
+        if selected_item:
+            self.query_text = selected_item.get("query")
+            self.command_text = selected_item.get("command")
+            # Refresh the display
+            self.query_one("#query_box Markdown").update(self.query_text or "No query provided.")
+            self.query_one("#command_box Markdown").update(self.command_text or "No command generated.")
+            self.notify("History item loaded.", title="History", severity="success", timeout=2.0)
+        else:
+            self.notify("No history item selected.", title="History", severity="info", timeout=2.0)
+
+
+    def action_copy_command(self) -> None:
+        """Copies the command to the clipboard."""
+        if not self.command_text:
+            self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
+            return
+
+        if cli.PYPERCLIP_AVAILABLE:
+            try:
+                import pyperclip
+                pyperclip.copy(self.command_text)
+                self.notify("Command copied to clipboard!", title="Copied!", severity="success", timeout=2.0)
+            except pyperclip.PyperclipException:
+                self.notify("Copy failed. Ensure you have 'xclip' or 'xsel' installed.", title="Copy Error", severity="error", timeout=3.0)
+        else:
+            self.notify("pyperclip
