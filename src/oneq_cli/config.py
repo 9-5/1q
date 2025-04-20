@@ -26,81 +26,66 @@ SETTINGS_SECTION = "Settings"
 OUTPUT_STYLE_CONFIG_KEY = "output_style"
 
 VALID_OUTPUT_STYLES = Literal["auto", "tui", "inline"]
-DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto" # type: ignore
+DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto"
 
 console = Console()
 
-def get_config_file_path() -> Path:
-    """Returns the path to the application's configuration file."""
-    return Path(user_config_path(APP_NAME, appauthor=False)) / CONFIG_FILE_NAME
-
-
-def get_gemini_api_key() -> str:
-    """
-    Retrieves the Gemini API key from the environment variables or the configuration file.
-
-    Returns:
-        str: The Gemini API key.
-
-    Raises:
-        ApiKeyNotFound: If the API key is not found in either the environment variables or the configuration file.
-    """
-    api_key = os.environ.get(API_KEY_ENV_VAR)
-    if api_key:
-        return api_key
-
-    config_file = get_config_file_path()
-    if config_file.exists():
-        config = configparser.ConfigParser()
-        config.read(config_file)
-        try:
-            return config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]
-        except KeyError:
-            pass  # Key not found in config file
-
-    raise ApiKeyNotFound(
-        f"Gemini API key not found. Please set the {API_KEY_ENV_VAR} environment variable or configure it via the TUI."
-    )
-
-
 class ConfigManager:
-    """Manages reading, writing, and updating the configuration file."""
+    """Manages the application's configuration."""
 
     def __init__(self) -> None:
-        self.config_file = get_config_file_path()
+        self.config_dir: Path = Path(user_config_path(APP_NAME, appauthor=False))
+        self.config_file: Path = self.config_dir / CONFIG_FILE_NAME
         self.config = configparser.ConfigParser()
-        self.config.read(self.config_file)
+        self.load_config()
 
-        # Ensure sections exist
+    def load_config(self) -> None:
+        """Loads the configuration from the config file."""
+        try:
+            self.config.read(self.config_file)
+        except configparser.Error as e:
+            raise ConfigurationError(f"Error parsing configuration file {self.config_file}: {e}") from e
+
+    def get_api_key(self) -> str:
+        """Retrieves the Gemini API key from the environment or config file."""
+        api_key = os.environ.get(API_KEY_ENV_VAR)
+        if not api_key:
+            try:
+                api_key = self.config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]
+            except KeyError:
+                raise ApiKeyNotFound("Gemini API key not found in environment or configuration file.")
+        return api_key
+
+    def save_api_key(self, api_key: str) -> None:
+        """Saves the Gemini API key to the configuration file."""
         if not self.config.has_section(CREDENTIALS_SECTION):
             self.config.add_section(CREDENTIALS_SECTION)
-        if not self.config.has_section(SETTINGS_SECTION):
-            self.config.add_section(SETTINGS_SECTION)
+        self.config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY] = api_key
+        self.write_config()
 
-    def get_output_style(self) -> str:
-        """Gets the configured output style, defaulting to 'auto' if not set."""
+    def get_default_output_style(self) -> "VALID_OUTPUT_STYLES": # type: ignore
+        """Retrieves the default output style from the config file."""
         try:
-            style = self.config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY]
-            if style not in get_args(VALID_OUTPUT_STYLES):
-                console.print(f"[yellow]Invalid output style in config file: {style}.  Using default 'auto'.[/]")
+            output_style = self.config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY]
+            if output_style not in get_args(VALID_OUTPUT_STYLES):
+                console.print(f"[yellow]Warning:[/yellow] Invalid output style '{output_style}' in config file.  Falling back to default 'auto'.")
                 return DEFAULT_OUTPUT_STYLE
-            return style
+            return output_style # type: ignore # It's already validated above
         except KeyError:
             return DEFAULT_OUTPUT_STYLE
 
-    def set_output_style(self, style: str) -> None:
-        """Sets the output style in the configuration."""
-        if style not in get_args(VALID_OUTPUT_STYLES):
-            raise ValueError(f"Invalid output style: {style}")
+    def set_default_output_style(self, style: "VALID_OUTPUT_STYLES") -> None: # type: ignore
+        """Sets the default output style in the configuration file."""
+        if not self.config.has_section(SETTINGS_SECTION):
+            self.config.add_section(SETTINGS_SECTION)
         self.config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY] = style
+        self.write_config()
 
-    def save_config(self) -> None:
+
+    def write_config(self) -> None:
         """Writes the configuration to the config file."""
         try:
-            # Ensure the config directory exists
-            config_dir = self.config_file.parent
-            config_dir.mkdir(parents=True, exist_ok=True)
-
+            self.config_dir.mkdir(parents=True, exist_ok=True)
             with open(self.config_file, "w") as f:
                 self.config.write(f)
         except OSError as e:
@@ -120,3 +105,13 @@ def clear_config_file() -> None:
             console.print(f"[red]Error:[/red] Could not remove configuration file {config_file}: {e}", style="red")
     else:
         console.print("Configuration file does not exist. Nothing to clear.", style="yellow")
+
+# Global config object
+_config_manager = ConfigManager()
+
+# Expose methods through the module-level interface, using the global instance.
+get_api_key = _config_manager.get_api_key
+save_api_key = _config_manager.save_api_key
+get_default_output_style = _config_manager.get_default_output_style
+set_default_output_style = _config_manager.set_default_output_style
+get_config_file_path = _config_manager.config_file.__str__
