@@ -26,109 +26,53 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Vertical {
-        width: auto;
-        height: auto;
-        border: tall $panel;
-        padding: 1 2;
-    }
+    Vertical { width: auto; height: auto; border: tall $panel; padding: 2 4; }
     Input { width: 60; }
-    Button { margin-top: 2; width: 100%; }
+    Button { width: 100%; margin-top: 2; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header(title=self.TITLE, show_clock=True)
-        yield Footer()
         with Vertical():
             yield Label(self.SUB_TITLE)
             api_key_input = Input(placeholder="Paste your API key here", id="api_key_input")
+            api_key_input.focus()
             yield api_key_input
-            yield Button("Save API Key", id="save_api_key", variant="primary")
-
+            yield Button("Save API Key", id="save", variant="primary")
+            yield Button("Cancel", id="cancel")
+        yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.control.id == "save_api_key":
+        if event.control.id == "save":
             api_key = self.query_one(Input).value
             if api_key:
-                self.exit(api_key)
+                try:
+                    cli.config.save_api_key(api_key)
+                    self.exit(api_key)  # Return the API key
+                except Exception as e:
+                    self.app.console.print(f"Error saving API key: {e}")
+                    self.exit(None)
             else:
-                self.notify("API Key cannot be empty!", severity="error", timeout=3.0)
+                self.app.console.print("API Key cannot be empty.")
+        elif event.control.id == "cancel":
+            self.exit(None)  # Return None if cancelled
 
+def run_api_key_setup() -> Union[str, None]:
+    """Runs the API Key setup TUI and returns the API key or None if cancelled."""
+    app = ApiKeyApp()
+    return app.run()
 
-class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the response and options."""
-    CSS_PATH = None
-    TITLE = "1Q - Response"
-    SUB_TITLE = "Review, Execute, or Modify"
-    BINDINGS = [
-        Binding("ctrl+e", "execute_command", "Execute", show=True),
-        Binding("ctrl+m", "modify_command", "Modify", show=True),
-        Binding("ctrl+r", "refine_query", "Refine", show=True),
-        Binding("ctrl+c", "copy_command", "Copy", show=True),
-        Binding("escape", "app.quit", "Quit", show=True),
-    ]
+class ResponseScreen(Screen):
+    """Screen for displaying the response and available actions."""
 
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-    #header {
-        dock: top;
-    }
-    #footer {
-        dock: bottom;
-    }
-
-    .main_container {
-        layout: horizontal;
-        height: 1fr;
-    }
-
-    .left_pane {
-        width: 50%;
-        border-right: tall $primary-background;
-        padding: 1;
-    }
-
-    .right_pane {
-        width: 50%;
-        padding: 1;
-    }
-
-    .scrollable {
-        overflow-y: scroll;
-        height: 100%;
-    }
-
-    Markdown {
-        height: auto;
-    }
-
-    #command_output {
-        margin-top: 1;
-        padding: 1;
-        border: tall $secondary;
-    }
-
-    .history_list_item {
-        padding: 0;
-        margin: 0;
-    }
-
-    ListView {
-        border: tall $secondary;
-    }
-    """
-
-    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
-        super().__init__(**kwargs)
+    def __init__(self, response_data: Dict[str, Any], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None, disabled: bool = False):
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.query_text: str = response_data.get("query", "No query provided.")
         self.command_text: str = response_data.get("command", "No command generated.")
         self.history_data: List[Dict[str, str]] = history.load_history()
 
-
     def compose(self) -> ComposeResult:
-        yield Header(title=self.TITLE, show_clock=True)
+        yield Header(title="1Q Response", show_clock=True)
         yield Footer()
 
         with Container(classes="main_container"):
@@ -139,4 +83,74 @@ class ResponseApp(App[ResponseAppResult]):
                 yield Static(self.command_text, id="command_output", classes="scrollable")
 
             with Vertical(classes="right_pane"):
-                yield
+                yield Button("Execute Command", id="execute", variant="primary")
+                yield Button("Modify Command", id="modify")
+                yield Button("Refine Query", id="refine")
+                yield Button("Copy Command", id="copy")
+
+
+class ResponseApp(App[ResponseAppResult]):
+    """Main app for displaying the response and handling actions."""
+
+    CSS_PATH = None
+    BINDINGS = [
+        Binding("e", "execute_command", "Execute", key_display="E"),
+        Binding("m", "modify_command", "Modify", key_display="M"),
+        Binding("r", "refine_query", "Refine", key_display="R"),
+        Binding("c", "copy_command", "Copy", key_display="C"),
+        Binding("q", "quit", "Quit", key_display="Q"),
+    ]
+
+    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
+        super().__init__(**kwargs)
+        self.response_data = response_data
+        self.query_text: str = response_data.get("query", "No query provided.")
+        self.command_text: str = response_data.get("command", "No command generated.")
+        self.history_data: List[Dict[str, str]] = history.load_history()
+
+    def on_mount(self) -> None:
+        self.push_screen(ResponseScreen(self.response_data))
+
+    def action_quit(self) -> None:
+         """Quits the TUI app."""
+         self.exit()
+
+    def action_copy_command(self) -> None:
+        """Copies the command to the clipboard."""
+        if not self.command_text:
+            self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
+            return
+
+        try:
+            import pyperclip
+            pyperclip.copy(self.command_text)
+            self.notify("Command copied to clipboard!", title="Command Copied", severity="success", timeout=3.0)
+
+        except ImportError:
+            self.notify("pyperclip is not installed. Please install it to use the copy feature.", title="Copy Failed", severity="error", timeout=5.0)
+
+
+    def action_execute_command(self) -> None:
+        """Exits the TUI signalling to execute the command."""
+        if not self.command_text:
+             self.notify("No command to execute.", title="Execution Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("execute")
+
+    def action_modify_command(self) -> None:
+        """Exits the TUI signalling to modify the command."""
+        if not self.command_text:
+             self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("modify")
+
+    def action_refine_query(self) -> None:
+        """Exits the TUI signalling to refine the query."""
+        self.exit("refine")
+
+
+def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
+    """Runs the ResponseApp and returns the chosen action."""
+    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
+    result = app.run()
+    return result

@@ -22,9 +22,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Environment :: Console",
+... (FILE CONTENT TRUNCATED) ...
+onment :: Console",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Code Generators",
     "Topic :: Utilities",
