@@ -22,45 +22,78 @@ def _get_platform_context() -> str:
         try:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
-            os_name = f"{os_name} ({distro})"
-        except FileNotFoundError:
-            pass  # Unable to determine distro.
-
-        try:
-            shell = os.environ.get("SHELL")
-            if shell:
-                shell_name = os.path.basename(shell)
-                context_parts.append(f"Shell: {shell_name}")
-        except Exception:
+            os_name += f" ({distro})"
+        except AttributeError: # Handle cases where freedesktop_os_release might not be available
             pass
 
-    context_parts.insert(0, f"OS: {system}")
+        context_parts.append(f"Operating System: {os_name}")
+    else:
+        context_parts.append(f"Operating System: {system}")
+
+    shell = os.environ.get("SHELL")
+    if shell:
+        shell_name = os.path.basename(shell)
+        context_parts.append(f"Shell: {shell_name}")
+
     return ", ".join(context_parts)
 
-def generate_command(query: str, api_key: str) -> Dict[str, Any]:
-    """Generates a shell command based on the given query using the Gemini API."""
+
+def generate_command(api_key: str, query: str) -> Dict[str, str]:
+    """
+    Generates a shell command based on the given query using the Gemini API.
+
+    Args:
+        api_key: The Gemini API key.
+        query: The natural language query.
+
+    Returns:
+        A dictionary containing the generated command and its explanation, or None if an error occurs.
+    """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
+    model = genai.GenerativeModel(MODEL_NAME) # was 'gemini-pro'
 
     platform_context = _get_platform_context()
 
-    prompt = f"""You are a command-line tool expert. Generate a single, valid shell command (or a short chain of commands using &&) that satisfies the user's request.
-The command should be executable directly in a terminal. Only output the command(s).
-If the request is ambiguous, make reasonable assumptions to provide a useful command.
+    prompt = f"""
+    You are an expert at generating shell commands and code snippets based on natural language queries.
+    Your primary goal is to provide accurate, concise, and executable commands. Assume the user is an expert.
+    Provide just the command unless an explanation is unavoidable. Assume the user is running the command in a {platform_context} environment.
 
-Here is some context about the user's environment: {platform_context}
+    Example:
+    User Query: list files in Documents ending with .pdf
+    Generated Command: find ~/Documents -name "*.pdf"
 
-User Query: {query}
-"""
+    User Query: {query}
+    Generated Command:
+    """
+
     try:
         response = model.generate_content(prompt)
-        command = response.text.strip()
-        # Basic cleaning: Remove any leading/trailing quotes or backticks.
-        command = command.strip('"`')
-        return {"command": command}
+
+        # Extract the command from the response.  Look for a code block, otherwise take the first line.
+        response_text = response.text
+        command = ""
+        explanation = ""
+
+        # Regex to find markdown code blocks (```shell ... ``` or ```bash ... ``` or ``` ... ```)
+        match = re.search(r"```(?:shell|bash)?\n(.*?)\n```", response_text, re.DOTALL)
+        if match:
+            command = match.group(1).strip()
+            # If there's anything *before* the code block, consider it an explanation.
+            pre_match = response_text[:match.start()].strip()
+            if pre_match:
+                explanation = pre_match
+        else:
+            # No code block found; just take the first line as the command.
+            command = response_text.splitlines()[0].strip()
+            if len(response_text.splitlines()) > 1:
+                explanation = "\n".join(response_text.splitlines()[1:]).strip()
+
+
+        return {"command": command, "explanation": explanation}
+
     except google_exceptions.ResourceExhausted as e:
-        raise GeminiApiError(
-            "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+        raise GeminiApiError("Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:
