@@ -12,51 +12,9 @@ https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 ## Table of Contents
 
 *   [Features](#features)
-*   [Installation](#installation)
-*   [Usage](#usage)
-*   [Contributing](#contributing)
-*   [License](#license)
-
-## Features
-
-*   **Natural Language to Code**: Describe what you want to do, and `1q` will generate the corresponding shell command or code snippet.
-*   **Cross-Platform**: Works on macOS, Linux, and Windows.
-*   **Interactive TUI**: Review, execute, or modify suggested commands in a user-friendly terminal interface.
-*   **Configuration**: Customize the output style and manage your API key.
-*   **History**: Access and reuse previous queries and generated commands.
-
-## Installation
-
-```bash
-pip install oneq
-```
-
-## Usage
-
-```bash
-1q "list files in Documents ending with .pdf"
-```
-
-### Command-Line Options
-
-```
-usage: 1q [-h] [-k API_KEY] [-o {auto,tui,inline}] [--show-config-path]
-          [--clear-config] [--set-default-output STYLE] [-v]
-          [query]
-
-1Q - The right one-liner is just one query away.
-
-positional arguments:
-  query                 The query to translate into a command.
-
-options:
-  -h, --help            show this help message and exit
-  -k API_KEY, --api-key API_KEY
-                        Manually specify the Gemini API key. Overrides config default.
-  -o {auto,tui,inline}, --output {auto,tui,inline}
-                        Specify the output style: auto (TUI if interactive,
-                        inline otherwise), tui (Textual UI), or inline (plain
-                        text). Overrides config default.
+*   [In
+... (FILE CONTENT TRUNCATED) ...
+ig default.
   -v, --version         show program's version number and exit
 
 Configuration and Info Actions:

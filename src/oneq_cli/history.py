@@ -27,10 +27,10 @@ def load_history() -> List[Dict[str, str]]:
         with open(history_file, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        return []  # Handle case where history file doesn't exist yet.
+        return []
     except json.JSONDecodeError:
-        print("Warning: Could not decode history file.  It may be corrupted.")
-        return [] # Corrupted history file.
+        print("Warning: History file is corrupt. Returning empty history.")
+        return []
 
 def save_history(query: str, command: str) -> None:
   """Saves a query and its corresponding command to the history file."""
