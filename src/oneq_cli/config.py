@@ -26,145 +26,84 @@ SETTINGS_SECTION = "Settings"
 OUTPUT_STYLE_CONFIG_KEY = "output_style"
 
 VALID_OUTPUT_STYLES = Literal["auto", "tui", "inline"]
-DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto" # type: ignore
+DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto"
 
 console = Console()
 
-def get_config_dir_path() -> Path:
-    """Returns the path to the application's configuration directory."""
-    return Path(user_config_path(APP_NAME, appauthor=False))
-
 def get_config_file_path() -> Path:
     """Returns the path to the configuration file."""
-    return get_config_dir_path() / CONFIG_FILE_NAME
+    return Path(user_config_path(APP_NAME, appauthor=False)) / CONFIG_FILE_NAME
 
-def get_api_key() -> str:
-    """
-    Retrieves the Gemini API key from the environment variables or the configuration file.
 
-    Returns:
-        str: The Gemini API key.
+def load_config() -> configparser.ConfigParser:
+    """Loads the configuration from the config file."""
+    config_file = get_config_file_path()
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_file)
+    except Exception as e:
+        raise ConfigurationError(f"Error reading configuration file {config_file}: {e}") from e
+    return config
 
-    Raises:
-        ApiKeyNotFound: If the API key is not found in either the environment variables or the configuration file.
-        ConfigurationError: If there's an issue reading the configuration file.
-    """
-    # 1. Check environment variables
+
+def get_api_key(config: Optional[configparser.ConfigParser]) -> str:
+    """Retrieves the Gemini API key from the environment or config file."""
     api_key = os.environ.get(API_KEY_ENV_VAR)
-    if api_key:
-        return api_key
-
-    # 2. Check the configuration file
-    config_file = get_config_file_path()
-    if config_file.exists():
-        try:
-            config = configparser.ConfigParser()
-            config.read(config_file)
-            if CREDENTIALS_SECTION in config and API_KEY_CONFIG_KEY in config[CREDENTIALS_SECTION]:
-                return config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY]
-        except Exception as e:
-            raise ConfigurationError(f"Error reading configuration file {config_file}: {e}") from e
-
-    # 3. If not found anywhere, raise ApiKeyNotFound
-    raise ApiKeyNotFound("Gemini API key not found. Please set the GEMINI_API_KEY environment variable or configure it using --set-api-key.")
-
-def get_output_style() -> VALID_OUTPUT_STYLES:
-    """
-    Retrieves the configured output style from the configuration file.  Defaults to "auto".
-    """
-    config_file = get_config_file_path()
-    if config_file.exists():
-        try:
-            config = configparser.ConfigParser()
-            config.read(config_file)
-            if SETTINGS_SECTION in config and OUTPUT_STYLE_CONFIG_KEY in config[SETTINGS_SECTION]:
-                output_style = config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY]
-                if output_style in get_args(VALID_OUTPUT_STYLES):
-                    return output_style # type: ignore
-                else:
-                    console.print(f"[yellow]Warning:[/yellow] Invalid output style '{output_style}' in config file. Falling back to default 'auto'.", style="yellow")
-                    return DEFAULT_OUTPUT_STYLE
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Error reading configuration file {config_file}. Falling back to default 'auto'.", style="yellow")
-            return DEFAULT_OUTPUT_STYLE
-    return DEFAULT_OUTPUT_STYLE
+    if not api_key:
+        if config and config.has_option(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY):
+            api_key = config.get(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY)
+        else:
+            raise ApiKeyNotFound(
+                f"Gemini API key not found. Set the {API_KEY_ENV_VAR} environment variable or configure it using the TUI."
+            )
+    return api_key
 
 
 def save_api_key(api_key: str) -> None:
-    """
-    Saves the Gemini API key to the configuration file.
-
-    Args:
-        api_key (str): The Gemini API key to save.
-
-    Raises:
-        ConfigurationError: If there's an issue writing to the configuration file.
-    """
+    """Saves the Gemini API key to the config file."""
     config_file = get_config_file_path()
     config = configparser.ConfigParser()
-
-    # Read existing config if it exists, to preserve other settings
     if config_file.exists():
-        try:
-            config.read(config_file)
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Error reading existing configuration file {config_file}.  Existing settings may be lost.", style="yellow")
+        config.read(config_file)
 
     if not config.has_section(CREDENTIALS_SECTION):
         config.add_section(CREDENTIALS_SECTION)
-    config[CREDENTIALS_SECTION][API_KEY_CONFIG_KEY] = api_key
+    config.set(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY, api_key)
 
     try:
         # Ensure the config directory exists
-        config_dir = get_config_dir_path()
+        config_dir = config_file.parent
         config_dir.mkdir(parents=True, exist_ok=True)
 
         with open(config_file, "w") as f:
             config.write(f)
-        os.chmod(config_file, 0o600)  # Set permissions to read/write for the user only
+        console.print(f"API key saved to configuration file: {config_file}", style="green")
 
-        console.print(f"API key saved to {config_file}", style="green")
     except OSError as e:
         raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
     except Exception as e:
         raise ConfigurationError(f"Unexpected error writing configuration file {config_file}: {e}") from e
 
-def set_output_style(output_style: str) -> None:
-    """
-    Sets the default output style in the configuration file.
-
-    Args:
-        output_style (str): The output style to set (tui, inline, auto).
-
-    Raises:
-        ValueError: If the provided output style is invalid.
-        ConfigurationError: If there's an issue writing to the configuration file.
-    """
-    if output_style not in get_args(VALID_OUTPUT_STYLES):
-        raise ValueError(f"Invalid output style: {output_style}.  Must be one of {get_args(VALID_OUTPUT_STYLES)}")
-
+def set_output_style(style: str) -> None:
+    """Sets the default output style in the config file."""
     config_file = get_config_file_path()
     config = configparser.ConfigParser()
-
-    # Read existing config if it exists
     if config_file.exists():
-        try:
-            config.read(config_file)
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Error reading existing configuration file {config_file}. Existing settings may be lost.", style="yellow")
+        config.read(config_file)
 
     if not config.has_section(SETTINGS_SECTION):
         config.add_section(SETTINGS_SECTION)
-    config[SETTINGS_SECTION][OUTPUT_STYLE_CONFIG_KEY] = output_style
+    config.set(SETTINGS_SECTION, OUTPUT_STYLE_CONFIG_KEY, style)
 
     try:
         # Ensure the config directory exists
-        config_dir = get_config_dir_path()
+        config_dir = config_file.parent
         config_dir.mkdir(parents=True, exist_ok=True)
 
         with open(config_file, "w") as f:
             config.write(f)
-        os.chmod(config_file, 0o600)  # Set permissions to read/write for the user only
+        console.print(f"Output style saved to configuration file: {config_file}", style="green")
+
     except OSError as e:
         raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
     except Exception as e:
