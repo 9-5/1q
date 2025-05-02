@@ -1,0 +1,63 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oneq"
+version = "1.0.0"
+description = "1Q: 1 query away from the right one-line command."
+readme = "README.md"
+requires-python = ">=3.8" # Minimum Python version
+license = { file = "LICENSE" } # Or { text = "MIT" } etc.
+authors = [
+  { name = "John Le", email = "john@oj.hn" },
+]
+keywords = ["cli", "ai", "commandgen", "codegen", "devtool"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "google-generativeai",
+    "textual>=0.50.0",
+    "platformdirs>=3.0.0",
+    "rich",
+    "pyperclip>=1.8.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff", # Linter and formatter
+    # Add other dev tools if needed (e.g., mypy)
+]
+
+[project.scripts]
+1q = "oneq_cli.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/9-5/1q"
+
+# Tool-specific configurations (e.g., for Ruff)
+[tool.ruff]
+line-length = 88
+select = ["E", "W", "F", "I", "UP", "PL", "TID", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
