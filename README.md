@@ -1,11 +1,13 @@
-# 1Q - Your thought is just one query a way.
+# 1Q - The right one-liner is just one query away.
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://badge.fury.io/py/oneq.svg)](https://badge.fury.io/py/oneq)
 <p align="center">
-    <img src="assets/icons/1Q.svg" alt="1Q Icon" height=35% width=35%>
+    <img src="assets/icons/1Q.svg" alt="1Q Icon" height=25% width=25%>
 </p>
 
 `1q`, short for 1Query, is a cross-platform command-line utility that lets you use natural language to generate shell commands, command chains, and code snippets right in your terminal. Get the command you need instantly, review it, modify it, and even execute it directly!
+
+https://github.com/user-attachments/assets/b3bb7b79-a9f3-4d23-96f6-788cecd5dfa4
 
 ## Table of Contents
 
