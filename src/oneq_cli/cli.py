@@ -35,226 +35,163 @@ except ImportError:
 
 console = Console()
 
-def main() -> None:
-    """
-    Main entry point for the 1Q CLI application.
-    """
+def main():
     parser = argparse.ArgumentParser(
-        description="1Q: Get the right one-liner command with natural language.",
+        description="1Q: The right one-liner is just one query away.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("query", nargs="*", help="Natural language query for the command.")
+    parser.add_argument("query", nargs="?", help="Natural language query for command generation.")
     parser.add_argument(
-        "-s",
-        "--style",
-        choices=["auto", "tui", "inline"],
-        default="auto",
-        help="Output style: auto (default), tui (Textual UI), inline (plain text).",
+        "-s", "--style", choices=get_args(config.VALID_OUTPUT_STYLES),
+        help="Force output style (auto, tui, inline). Overrides config."
     )
     parser.add_argument(
-        "-e",
-        "--execute",
-        action="store_true",
-        help="Execute the generated command directly (use with caution!).",
-    )
-    parser.add_argument(
-        "-c",
-        "--copy",
-        action="store_true",
-        help="Copy the generated command to the clipboard.",
-    )
-    parser.add_argument(
-        "-ig",
-        "--ignore-default",
-        action="store_true",
-        help="Ignore default configuration and use command-line arguments.",
-    )
-    parser.add_argument(
-        "-v",
-        "--version",
-        action="version",
-        version="1Q 1.0.0",  # Replace with actual version string
+        "-v", "--version", action="version", version="1q 1.0.0",
+        help="Show program's version number and exit"
     )
 
-    # Configuration and Info Actions
     config_group = parser.add_argument_group("Configuration and Info Actions")
     config_group.add_argument(
-        "--show-config-path",
-        action="store_true",
-        help="Print the path to the configuration file and exit.",
+        "--show-config-path", action="store_true",
+        help="Print the path to the configuration file and exit."
     )
     config_group.add_argument(
-        "--clear-config",
-        action="store_true",
-        help="Remove the configuration file (prompts for confirmation).",
+        "--clear-config", action="store_true",
+        help="Remove the configuration file (prompts for confirmation)."
     )
     config_group.add_argument(
-        "--set-default-output",
-        dest="default_output_style",
-        choices=["auto", "tui", "inline"],
-        help="Set and save the default output style in the config file (auto, tui, inline).",
+        "--set-default-output", dest="default_output_style", choices=get_args(config.VALID_OUTPUT_STYLES),
+        help="Set and save the default output style in the config file (auto, tui, inline)."
     )
 
     args = parser.parse_args()
 
-    # Handle Config Info Actions
+    # Handle config-related actions *before* potentially needing the API key
     if args.show_config_path:
         print(config.get_config_file_path())
         sys.exit(0)
 
     if args.clear_config:
-        if Confirm.ask("Are you sure you want to remove the configuration file?"):
+        if Confirm.ask("Are you sure you want to remove the configuration file? This action cannot be undone."):
             config.clear_config_file()
         sys.exit(0)
 
     if args.default_output_style:
         try:
-            config.set_output_style(args.default_output_style)
-            console.print(f"Default output style set to: {args.default_output_style}", style="green")
+            config.set_config_value(config.SETTINGS_SECTION, config.OUTPUT_STYLE_CONFIG_KEY, args.default_output_style)
+            console.print(f"Default output style set to '{args.default_output_style}'.", style="green")
         except config.ConfigurationError as e:
             console.print(f"[red]Error:[/red] {e}", style="red")
         sys.exit(0)
 
-
-    # Load configuration (unless --ignore-default is set)
-    cfg = None
-    if not args.ignore_default:
-        try:
-            cfg = config.load_config()
-        except FileNotFoundError:
-            console.print(
-                "[yellow]Warning:[/yellow] Configuration file not found. Using defaults.",
-                style="yellow",
-            )
-        except config.ConfigurationError as e:
-            console.print(f"[red]Error:[/red] {e}", style="red")
-            sys.exit(1)
-
-    # Determine output style (command-line argument overrides config)
-    output_style = args.style
-    if args.style == "auto":
-        if cfg and cfg.has_option("Settings", "output_style"):
-            output_style = cfg.get("Settings", "output_style")
-        else:
-            output_style = config.DEFAULT_OUTPUT_STYLE
-    
-    # Check for API key
     try:
-        api_key = config.get_api_key(cfg)
+        # Load configuration and API key
+        cfg = config.load_config()
+        api_key = config.get_gemini_api_key(cfg)
+        genai = gemini.init_gemini_api(api_key)
+
     except ApiKeyNotFound:
-        console.print(
-            "[yellow]Warning:[/yellow] Gemini API key not found. Launching setup...",
-            style="yellow",
-        )
-        try:
-            api_key = tui.ApiKeyApp().run()
-            if api_key is None:
-                raise ApiKeySetupCancelled("API Key setup cancelled.")
-            config.save_api_key(api_key)
-        except ApiKeySetupCancelled as e:
-            console.print(f"[red]Error:[/red] {e}", style="red")
-            sys.exit(1)
-        except Exception as e:
-            console.print(f"[red]Error:[/red] An unexpected error occurred during API key setup: {e}", style="red")
-            sys.exit(1)
-
-    query = " ".join(args.query)
-    if not query:
-        console.print("Please provide a query.", style="yellow")
-        sys.exit(1)
-
-    try:
-        response_data = gemini.generate_command(query, api_key)
-    except GeminiApiError as e:
-        console.print(f"[red]Error:[/red] {e}", style="red")
-        sys.exit(1)
-
-    if output_style == "tui":
-        try:
-            result = tui.display_response_tui(response_data)
-
-            if result.action == "execute":
-                # Execute the command
-                if result.command:
-                    try:
-                        console.print(f"Executing: {result.command}", style="green")
-                        subprocess.run(result.command, shell=True, check=True)
-                    except subprocess.CalledProcessError as e:
-                        console.print(f"[red]Error:[/red] Command failed: {e}", style="red")
-                    except FileNotFoundError as e:
-                        console.print(f"[red]Error:[/red] Command not found: {e}", style="red")
-                    except Exception as e:
-                        console.print(f"[red]Error:[/red] An unexpected error occurred during command execution: {e}", style="red")
+        console.print("[yellow]Gemini API key not found.[/yellow]")
+        if Confirm.ask("Do you want to set up the API key now?"):
+            try:
+                api_key = tui.run_api_key_setup()
+                if api_key:
+                     cfg = config.load_config() # Reload config to get new api key value
+                     config.set_config_value(config.CREDENTIALS_SECTION, config.API_KEY_CONFIG_KEY, api_key)
+                     console.print("[green]API key saved successfully![/green]")
+                     genai = gemini.init_gemini_api(api_key) # Initialize Gemini after setting up key.
                 else:
-                     console.print("[yellow]Warning:[/yellow] No command to execute.", style="yellow")
+                    raise ApiKeySetupCancelled("API Key setup was cancelled.")
 
-            elif result.action == "modify":
-                # Allow user to modify the command (implementation depends on your TUI)
-                if result.command:
-                    console.print("[yellow]Allowing modification of command (feature not fully implemented yet).[/yellow]", style="yellow")
-                    # You might want to open a text editor or provide an input field in the TUI here.
-                else:
-                    console.print("[yellow]Warning:[/yellow] No command to modify.", style="yellow")
-
-            elif result.action == "refine":
-                 console.print("[yellow]Allowing refinement of query (feature not fully implemented yet).[/yellow]", style="yellow")
-
-            elif result.action == "copy":
-                if result.command:
-                    try:
-                        if PYPERCLIP_AVAILABLE:
-                            pyperclip.copy(result.command)
-                            console.print("[green]Command copied to clipboard![/green]", style="green")
-                        else:
-                            console.print("[yellow]pyperclip is not installed. Please install it to use the copy feature.[/yellow]")
-                    except Exception as e:
-                         console.print(f"[red]Error:[/red] An unexpected error occurred during command copy: {e}", style="red")
-
-            elif result.action == "view_history":
-                 tui.display_history_tui()
-
-            # No action implies cancelled.
-            else:
-                console.print("Action cancelled.", style="yellow")
-
-            if result.query and result.command:
-                history.save_history(result.query, result.command)
-
-        except Exception as e:
-            console.print(f"[red]Error:[/red] An unexpected error occurred in TUI mode: {e}", style="red")
-
-    else:  # Inline mode
-        if response_data and "command" in response_data:
-            command = response_data["command"]
-            console.print(f"Generated Command:\n{command}", style="green")
-
-            if args.execute:
-                try:
-                    console.print(f"Executing: {command}", style="green")
-                    subprocess.run(command, shell=True, check=True)
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]Error:[/red] Command failed: {e}", style="red")
-                except FileNotFoundError as e:
-                    console.print(f"[red]Error:[/red] Command not found: {e}", style="red")
-                except Exception as e:
-                    console.print(f"[red]Error:[/red] An unexpected error occurred during command execution: {e}", style="red")
-            
-            if args.copy:
-                try:
-                    if PYPERCLIP_AVAILABLE:
-                        pyperclip.copy(command)
-                        console.print("[green]Command copied to clipboard![/green]", style="green")
-                    else:
-                        console.print("[yellow]pyperclip is not installed. Please install it to use the copy feature.[/yellow]")
-                except Exception as e:
-                     console.print(f"[red]Error:[/red] An unexpected error occurred during command copy: {e}", style="red")
-
-            history.save_history(query, command)
+            except ApiKeySetupCancelled:
+                console.print("[red]API key setup cancelled.[/red]")
+                sys.exit(1) # Exit if API key setup is cancelled.
+            except config.ConfigurationError as e:
+                console.print(f"[red]Error:[/red] {e}", style="red")
+                sys.exit(1)
 
         else:
-            console.print("[yellow]No command generated.[/yellow]", style="yellow")
+            console.print("[yellow]Please set up the Gemini API key to use 1Q.[/yellow]")
+            sys.exit(1)
+
+    except ConfigurationError as e:
+        console.print(f"[red]Configuration Error:[/red] {e}", style="red")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred:[/red] {e}", style="red")
+        sys.exit(1)
+
+    if not args.query:
+        console.print("Please provide a query.  Example: 1q list files in Documents ending with .pdf")
+        sys.exit(1)
+
+    query = args.query
+
+    # Determine output style: CLI arg > config > default
+    output_style = args.style or cfg.get(config.SETTINGS_SECTION, config.OUTPUT_STYLE_CONFIG_KEY, fallback=config.DEFAULT_OUTPUT_STYLE)
+
+    try:
+        response = gemini.generate_command(genai, query)
+        full_response_text = response.text if response and hasattr(response, 'text') else "No response from Gemini."
+
+        # Extract code block using regex.
+        match = re.search(r"```(.*?)```", full_response_text, re.DOTALL)
+        command_text = match.group(1).strip() if match else full_response_text.strip()
+
+        history.save_history(query, command_text)
+
+        if output_style == "tui":
+            response_data = {
+                "query": query,
+                "command": command_text,
+                "full_response": full_response_text,
+            }
+            tui_result = tui.display_response_tui(response_data)
+
+            if tui_result == "copy":
+                if PYPERCLIP_AVAILABLE:
+                    pyperclip.copy(command_text)
+                    console.print("[green]Command copied to clipboard![/green]")
+                else:
+                    console.print("[red]pyperclip not installed. Please install it to copy to clipboard.[/red]")
+            elif tui_result == "execute":
+                try:
+                    console.print(f"Executing command: [cyan]{command_text}[/cyan]")
+                    process = subprocess.Popen(shlex.split(command_text), shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    stdout, stderr = process.communicate()
+
+                    if stdout:
+                        console.print("[bold]Output:[/bold]\n" + stdout.decode())
+                    if stderr:
+                        console.print("[bold red]Error:[/bold red]\n" + stderr.decode())
+                    if not stdout and not stderr:
+                        console.print("[italic]No output[/italic]")
+
+                except FileNotFoundError as e:
+                    console.print(f"[red]Error: Command not found: {e}[/red]")
+                except Exception as e:
+                    console.print(f"[red]Error executing command: {e}[/red]")
+            elif tui_result == "modify":
+                console.print("[yellow]Modify command action selected (feature not implemented yet).[/yellow]")
+            elif tui_result == "refine":
+                 console.print("[yellow]Refine query action selected (feature not implemented yet).[/yellow]")
+
+        elif output_style == "inline" or output_style == "auto":
+            # Inline output (or fallback from auto)
+            console.print(f"[bold]Query:[/bold] {query}\n")
+            console.print(f"[bold]Command:[/bold] [cyan]{command_text}[/cyan]\n")
+            console.print(f"[bold]Full Response:[/bold]\n{full_response_text}")
+        else:
+            console.print(f"[red]Invalid output style: {output_style}[/red]")
+
+    except GeminiApiError as e:
+        console.print(f"[red]Gemini API Error:[/red] {e}", style="red")
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred:[/red] {e}", style="red")
 
 if __name__ == "__main__":
+    # Add the project's src/ directory to the Python path
+    # This allows running the script directly without installing the package
     project_root = Path(__file__).resolve().parent.parent.parent
     src_path = project_root / 'src'
     if str(src_path) not in sys.path:

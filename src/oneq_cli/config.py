@@ -26,13 +26,13 @@ SETTINGS_SECTION = "Settings"
 OUTPUT_STYLE_CONFIG_KEY = "output_style"
 
 VALID_OUTPUT_STYLES = Literal["auto", "tui", "inline"]
-DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto"
+DEFAULT_OUTPUT_STYLE: VALID_OUTPUT_STYLES = "auto" # type: ignore
 
 console = Console()
 
 def get_config_file_path() -> Path:
     """Returns the path to the configuration file."""
-    return Path(user_config_path(APP_NAME, appauthor=False)) / CONFIG_FILE_NAME
+    return Path(user_config_path(CONFIG_DIR_NAME, appauthor=False)) / CONFIG_FILE_NAME
 
 
 def load_config() -> configparser.ConfigParser:
@@ -41,69 +41,42 @@ def load_config() -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     try:
         config.read(config_file)
-    except Exception as e:
-        raise ConfigurationError(f"Error reading configuration file {config_file}: {e}") from e
+    except configparser.Error as e:
+        raise ConfigurationError(f"Error parsing configuration file {config_file}: {e}") from e
     return config
 
 
-def get_api_key(config: Optional[configparser.ConfigParser]) -> str:
-    """Retrieves the Gemini API key from the environment or config file."""
-    api_key = os.environ.get(API_KEY_ENV_VAR)
-    if not api_key:
-        if config and config.has_option(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY):
-            api_key = config.get(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY)
+def get_gemini_api_key(config: configparser.ConfigParser) -> str:
+    """
+    Retrieves the Gemini API key from the configuration or environment variable.
+    Raises ApiKeyNotFound exception if the key is not found in either location.
+    """
+    try:
+        api_key = config.get(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY)
+        return api_key
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        # API key not in config file, check environment variable
+        api_key = os.environ.get(API_KEY_ENV_VAR)
+        if api_key:
+            return api_key
         else:
-            raise ApiKeyNotFound(
-                f"Gemini API key not found. Set the {API_KEY_ENV_VAR} environment variable or configure it using the TUI."
-            )
-    return api_key
+            # API key not found in config or environment
+            raise ApiKeyNotFound("Gemini API key not found in configuration file or environment variable.")
 
 
-def save_api_key(api_key: str) -> None:
-    """Saves the Gemini API key to the config file."""
+def set_config_value(section: str, key: str, value: str) -> None:
+    """Sets a configuration value in the config file."""
     config_file = get_config_file_path()
-    config = configparser.ConfigParser()
-    if config_file.exists():
-        config.read(config_file)
+    config = load_config()
 
-    if not config.has_section(CREDENTIALS_SECTION):
-        config.add_section(CREDENTIALS_SECTION)
-    config.set(CREDENTIALS_SECTION, API_KEY_CONFIG_KEY, api_key)
+    if not config.has_section(section):
+        config.add_section(section)
+
+    config.set(section, key, value)
 
     try:
-        # Ensure the config directory exists
-        config_dir = config_file.parent
-        config_dir.mkdir(parents=True, exist_ok=True)
-
         with open(config_file, "w") as f:
             config.write(f)
-        console.print(f"API key saved to configuration file: {config_file}", style="green")
-
-    except OSError as e:
-        raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
-    except Exception as e:
-        raise ConfigurationError(f"Unexpected error writing configuration file {config_file}: {e}") from e
-
-def set_output_style(style: str) -> None:
-    """Sets the default output style in the config file."""
-    config_file = get_config_file_path()
-    config = configparser.ConfigParser()
-    if config_file.exists():
-        config.read(config_file)
-
-    if not config.has_section(SETTINGS_SECTION):
-        config.add_section(SETTINGS_SECTION)
-    config.set(SETTINGS_SECTION, OUTPUT_STYLE_CONFIG_KEY, style)
-
-    try:
-        # Ensure the config directory exists
-        config_dir = config_file.parent
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        with open(config_file, "w") as f:
-            config.write(f)
-        console.print(f"Output style saved to configuration file: {config_file}", style="green")
-
     except OSError as e:
         raise ConfigurationError(f"Error writing configuration file {config_file}: {e}") from e
     except Exception as e:

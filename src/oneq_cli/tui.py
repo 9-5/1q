@@ -24,68 +24,87 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Vertical { width: auto; height: auto; border: tall $primary; padding: 2; }
+    Container {
+        width: auto;
+        height: auto;
+        border: tall $primary 60%;
+        padding: 2;
+    }
     Input { width: 60; }
-    Button { margin-top: 2; width: 100%; }
+    Button { margin-top: 1; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Label(self.TITLE, id="title"),
-            Label(self.SUB_TITLE, id="subtitle"),
-            Input(placeholder="Paste your API key here", id="api-key-input"),
-            Button("Save", id="save-button", variant="primary"),
-            Button("Cancel", id="cancel-button"),
-        )
+        yield Header(title=self.TITLE,tall=False)
+        with Container():
+            yield Label(self.SUB_TITLE)
+            api_key_input = Input(placeholder="Enter your API key", id="api_key_input")
+            api_key_input.focus()
+            yield api_key_input
+            yield Button("Save API Key", id="save_api_key", variant="primary")
         yield Footer()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save-button":
-            api_key = self.query_one(Input).value.strip()
+        """Event handler called when a button is pressed."""
+        if event.control.id == "save_api_key":
+            api_key = self.query_one("#api_key_input", Input).value
             if api_key:
-                self.exit(api_key)
+                self.exit(api_key)  # Return the API key to the caller
             else:
-                self.notify("API key cannot be empty.", title="Error", severity="error", timeout=2.0)
-        elif event.button.id == "cancel-button":
-            self.exit(None) # Signal Cancel
+                self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+         api_key = self.query_one("#api_key_input", Input).value
+         if api_key:
+             self.exit(api_key)
+         else:
+             self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
 
 
-class ResponseAppResult:
-    """
-    A simple data class to hold the results from the ResponseApp.
-    Allows for more structured handling of the app's output.
-    """
+def run_api_key_setup() -> Union[str, None]:
+    """Runs the ApiKeyApp and returns the entered API key or None if cancelled."""
+    app = ApiKeyApp()
+    api_key = await app.run_async()
+    return api_key
 
-    def __init__(self, action: Optional[str] = None, command: Optional[str] = None, query: Optional[str] = None):
-        self.action = action
-        self.command = command
-        self.query = query
 
+ResponseAppResult = Union[Literal["copy", "execute", "modify", "refine"], None]
 
 class ResponseApp(App[ResponseAppResult]):
-    """
-    A Textual app to display the response and handle user actions.
-    """
-
-    CSS_PATH = None  # Override default CSS
+    """TUI App to display the response and offer actions."""
+    CSS_PATH = None
     BINDINGS = [
-        Binding("c", "copy_command", "Copy", show=True),
-        Binding("e", "execute_command", "Execute", show=True),
-        Binding("m", "modify_command", "Modify", show=True),
-        Binding("r", "refine_query", "Refine", show=True),
-        Binding("h", "view_history", "History", show=True),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("c", "copy_command", "Copy Command", show=True),
+        Binding("e", "execute_command", "Execute Command", show=True),
+        Binding("m", "modify_command", "Modify Command", show=True),
+        Binding("r", "refine_query", "Refine Query", show=True),
+        Binding("q", "quit", "Quit", show=True)
     ]
 
     def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
         super().__init__(**kwargs)
-        self.response_data = response_data
-        self.query_text: str = response_data.get("query", "")
-        self.command_text: str = response_data.get("command", "")
-        self.full_response_text: str = f"Query:\n{self.query_text}\n\nCommand:\n{self.command_text}"
+        self.query_text = response_data.get("query", "No query provided.")
+        self.command_text = response_data.get("command", "No command generated.")
+        self.full_response_text = response_data.get("full_response", "No response from the AI.")
+
+    CSS = """
+    #main_content {
+        layout: vertical;
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        padding: 1;
+    }
+
+    #response-text {
+        width: auto;
+        height: auto;
+        margin: 1;
+        padding: 1;
+    }
+    """
 
     def compose(self) -> ComposeResult:
-        """Compose the UI elements."""
         yield Header(title="1Q Response",tall=False)
         with Container(id="main_content"):
             yield Static(self.full_response_text, id="response-text", markup=False)
@@ -103,3 +122,22 @@ class ResponseApp(App[ResponseAppResult]):
         if not self.command_text:
              self.notify("No command to execute.", title="Execution Failed", severity="warning", timeout=3.0)
              return
+        self.exit("execute")
+
+    def action_modify_command(self) -> None:
+        """Exits the TUI signalling to modify the command."""
+        if not self.command_text:
+             self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("modify")
+
+    def action_refine_query(self) -> None:
+        """Exits the TUI signalling to refine the query."""
+        self.exit("refine")
+
+
+def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
+    """Runs the ResponseApp and returns the chosen action."""
+    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
+    result = app.run()
+    return result
