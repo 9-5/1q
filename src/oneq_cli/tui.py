@@ -15,6 +15,67 @@ from textual.widgets import Button, Label
 
 from . import history
 
+class HistoryBrowser(ModalScreen):
+    """A modal screen to display command history."""
+
+    def __init__(self, history_data: List[Dict[str, str]], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
+        super().__init__(name=name, id=id, classes=classes)
+        self.history_data = history_data
+
+    def compose(self) -> ComposeResult:
+        yield Header(title="Command History",tall=False)
+        yield Footer()
+        with VerticalScroll(id="history-container"):
+            for entry in self.history_data:
+                yield Static(f"[bold]Query:[/bold] {entry['query']}\n[bold]Command:[/bold] {entry['command']}\n{'-'*20}", style="bright_white", id="history-entry")
+        yield Horizontal(
+            Button("Close", variant="primary", id="close-history"),
+            Button("Execute", id="execute-history", disabled=True),  # Initially disabled
+            Button("Copy", id="copy-history", disabled=True), # Initially disabled
+            id="history-buttons"
+        )
+        self.selected_entry_index = None
+
+    def on_mount(self) -> None:
+        """Called when the history browser is mounted."""
+        if not self.history_data:
+            self.query_one("#history-container").mount(Static("No history available.", style="italic grey"))
+            self.query_one("#close-history").focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler for button presses."""
+        button_id = event.button.id
+        if button_id == "close-history":
+            self.app.pop_screen()
+        elif button_id == "execute-history":
+             if self.selected_entry_index is not None:
+                command = self.history_data[self.selected_entry_index]['command']
+                self.app.exit(command)
+        elif button_id == "copy-history":
+            if self.selected_entry_index is not None:
+                command = self.history_data[self.selected_entry_index]['command']
+                self.app.exit(("copy", command))
+
+    def on_click(self, event) -> None:
+        """Handles clicks on history entries."""
+        if str(event.target).startswith("Static(markup='[bold]Query:[/bold]"):
+            # Deselect previous selection
+            for entry in self.query_all("#history-entry"):
+                entry.styles.background = "transparent"
+                entry.styles.color = "bright_white"
+
+            # Select new entry
+            event.target.styles.background = "SteelBlue"
+            event.target.styles.color = "black"
+            # Extract the index from the target id
+            history_entries = self.query_all("#history-entry").all()
+            self.selected_entry_index = history_entries.index(event.target)
+
+            # Enable buttons
+            self.query_one("#execute-history").disabled = False
+            self.query_one("#copy-history").disabled = False
+            self.query_one("#execute-history").focus()
+
 
 class ApiKeyApp(App[Union[str, None]]):
     """TUI App to prompt for the Gemini API Key."""
@@ -24,120 +85,101 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Container {
-        width: auto;
-        height: auto;
-        border: tall $primary 60%;
-        padding: 2;
-    }
+    Vertical { width: auto; height: auto; }
     Input { width: 60; }
-    Button { margin-top: 1; }
+    Button { margin-top: 1; width: 20; }
+    Label { margin-bottom: 1; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Header(title=self.TITLE,tall=False)
-        with Container():
-            yield Label(self.SUB_TITLE)
-            api_key_input = Input(placeholder="Enter your API key", id="api_key_input")
-            api_key_input.focus()
-            yield api_key_input
-            yield Button("Save API Key", id="save_api_key", variant="primary")
+        yield Vertical(
+            Label(self.SUB_TITLE),
+            Input(password=True, placeholder="Paste API Key Here", id="api-key-input"),
+            Horizontal(
+                Button("Save", variant="primary", id="save-button"),
+                Button("Cancel", variant="default", id="cancel-button"),
+                ),
+        )
         yield Footer()
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Event handler called when a button is pressed."""
-        if event.control.id == "save_api_key":
-            api_key = self.query_one("#api_key_input", Input).value
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler for button presses."""
+        if event.button.id == "save-button":
+            api_key = self.query_one("#api-key-input", Input).value.strip()
             if api_key:
-                self.exit(api_key)  # Return the API key to the caller
+                self.exit(api_key)
             else:
-                self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
-
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-         api_key = self.query_one("#api_key_input", Input).value
-         if api_key:
-             self.exit(api_key)
-         else:
-             self.notify("API Key cannot be empty!", title="Error", severity="error", timeout=3.0)
+                self.notify("API Key cannot be empty.", title="Input Error", severity="error", timeout=2.0)
+        elif event.button.id == "cancel-button":
+            self.exit(None)
 
 
-def run_api_key_setup() -> Union[str, None]:
-    """Runs the ApiKeyApp and returns the entered API key or None if cancelled."""
-    app = ApiKeyApp()
-    api_key = await app.run_async()
-    return api_key
-
-
-ResponseAppResult = Union[Literal["copy", "execute", "modify", "refine"], None]
+ResponseAppResult = Optional[Literal["execute", "modify", "refine", "copy", "history"]]
 
 class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the response and offer actions."""
-    CSS_PATH = None
-    BINDINGS = [
-        Binding("c", "copy_command", "Copy Command", show=True),
-        Binding("e", "execute_command", "Execute Command", show=True),
-        Binding("m", "modify_command", "Modify Command", show=True),
-        Binding("r", "refine_query", "Refine Query", show=True),
-        Binding("q", "quit", "Quit", show=True)
-    ]
+    """TUI App to display the response and options."""
 
-    def __init__(self, response_data: Dict[str, Any], **kwargs: Any):
-        super().__init__(**kwargs)
-        self.query_text = response_data.get("query", "No query provided.")
-        self.command_text = response_data.get("command", "No command generated.")
-        self.full_response_text = response_data.get("full_response", "No response from the AI.")
+    TITLE = "1Q - Response"
+    CSS_PATH = None
 
     CSS = """
-    #main_content {
+    Screen {
         layout: vertical;
-        width: 100%;
-        height: 100%;
-        overflow-y: auto;
-        padding: 1;
     }
 
-    #response-text {
+    #response-container {
+        layout: vertical;
         width: auto;
         height: auto;
         margin: 1;
+        border: tall $primary 2;
         padding: 1;
     }
+    
+    #button-container {
+        layout: horizontal;
+        height: auto;
+        margin: 1;
+        align: center middle;
+    }
+
+    Markdown {
+        width: auto;
+    }
     """
+    BINDINGS = [
+        Binding("escape", "app.quit", "Quit", show=False),
+        Binding("ctrl+e", "execute_command", "Execute", show=True),
+        Binding("ctrl+c", "copy_command", "Copy", show=True),
+        Binding("ctrl+m", "modify_command", "Modify", show=True),
+        Binding("ctrl+r", "refine_query", "Refine", show=True),
+        Binding("ctrl+h", "view_history", "History", show=True),
+
+    ]
+
+    def __init__(self, response_data: Dict[str, Any], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
+         super().__init__(name=name, id=id, classes=classes)
+         self.response_data = response_data
+         self.query_text = response_data.get("query", "No query provided.")
+         self.command_text = response_data.get("command", "")
+         self.explanation_text = response_data.get("explanation", "")
 
     def compose(self) -> ComposeResult:
-        yield Header(title="1Q Response",tall=False)
-        with Container(id="main_content"):
-            yield Static(self.full_response_text, id="response-text", markup=False)
+        """Compose the UI."""
+        yield Header(title=self.TITLE, tall=False)
+        with Container(id="response-container"):
+            yield Markdown(f"[bold]Query:[/bold]\n{self.query_text}\n\n[bold]Command:[/bold]\n{self.command_text}\n\n[bold]Explanation:[/bold]\n{self.explanation_text}")
+
+        with Container(id="button-container"):
+            yield Button("Execute", variant="primary", id="execute")
+            yield Button("Copy", id="copy")
+            yield Button("Modify", id="modify")
+            yield Button("Refine", id="refine")
+            yield Button("History", id="history")
         yield Footer()
 
-    def action_copy_command(self) -> None:
-        """Exits the TUI signalling to copy the command."""
-        if not self.command_text:
-            self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
-            return
-        self.exit("copy")
+    def on_mount(self) -> None:
+        """Called when the app is mounted."""
+        self.set_focus(self.query_one("#execute", Button))
 
-    def action_execute_command(self) -> None:
-        """Exits the TUI signalling to execute the command."""
-        if not self.command_text:
-             self.notify("No command to execute.", title="Execution Failed", severity="warning", timeout=3.0)
-             return
-        self.exit("execute")
-
-    def action_modify_command(self) -> None:
-        """Exits the TUI signalling to modify the command."""
-        if not self.command_text:
-             self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
-             return
-        self.exit("modify")
-
-    def action_refine_query(self) -> None:
-        """Exits the TUI signalling to refine the query."""
-        self.exit("refine")
-
-
-def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
-    """Runs the ResponseApp and returns the chosen action."""
-    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
-    result = app.run()
-    return result
+    def on_button_pressed(self, event

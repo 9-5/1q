@@ -23,81 +23,57 @@ def _get_platform_context() -> str:
             release_info = platform.freedesktop_os_release()
             distro = release_info.get('PRETTY_NAME') or release_info.get('NAME', 'Unknown Distro')
             os_name += f" ({distro})"
-        except:
-            pass  # Ignore errors getting distro info
-
-        try:
-            shell = os.path.basename(os.environ.get('SHELL', 'Unknown'))
-            context_parts.append(f"Shell: {shell}")
-        except:
+        except:  # Broad except, platform info is best effort.
             pass
-
         context_parts.append(f"OS: {os_name}")
-    elif system == "Darwin":
-        os_name = "macOS"
-        os_version = platform.mac_ver()[0]  # e.g., "10.15.7"
-        context_parts.append(f"OS: {os_name} {os_version}")
-        try:
-            shell = os.path.basename(os.environ.get('SHELL', 'Unknown'))
-            context_parts.append(f"Shell: {shell}")
-        except:
-            pass
-    elif system == "Windows":
-        os_name = "Windows"
-        os_version = platform.version()  # e.g., "10.0.19041"
-        context_parts.append(f"OS: {os_name} {os_version}")
-        try:
-            shell = os.environ.get('COMSPEC', 'cmd.exe')  # COMSPEC usually points to cmd.exe
-            context_parts.append(f"Shell: {shell}")
 
-        except:
-            pass
-    else:
-        context_parts.append(f"OS: {system}")
+    shell = os.environ.get('SHELL')
+    if shell:
+        shell_name = os.path.basename(shell)
+        context_parts.append(f"Shell: {shell_name}")
 
     return ", ".join(context_parts)
 
 
-def init_gemini_api(api_key: str):
-    """Initializes the Gemini API with the provided API key."""
-    try:
-        genai.configure(api_key=api_key)
-        return genai
-    except Exception as e:
-        raise GeminiApiError(f"Error initializing Gemini API: {e}") from e
+def generate_command(api_key: str, query: str) -> Dict[str, str]:
+    """
+    Generates a shell command based on the user's query using the Gemini API.
 
-def generate_command(genai: Any, query: str) -> Any:
-    """Generates a shell command using the Gemini API."""
+    Args:
+        api_key: The Gemini API key.
+        query: The user's natural language query.
+
+    Returns:
+        A dictionary containing the generated command and its explanation.
+
+    Raises:
+        GeminiApiError: If there is an error communicating with the Gemini API.
+    """
+    genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
+
     platform_context = _get_platform_context()
 
-    prompt = f"""You are a command-line assistant. Your goal is to translate a user's natural language query into a shell command.
-    The user is operating in the following environment: {platform_context}. Only respond with the shell command, unless the user asks for an explanation.
-    If the user asks a question that is not related to generating shell commands, respond politely that you are designed to generate shell commands.
-    If you are unable to generate a command, explain why. Do not ask the user for clarification.
-    Here are some examples:
-    User Query: create a directory called "test"
-    Generated Command: ```mkdir test```
-    User Query: list all files in the current directory
-    Generated Command: ```ls -l```
-     User Query: show the first 10 lines of the file "my_file.txt"
-    Generated Command: ```head -n 10 my_file.txt```
-    User Query: search for the string "hello" in all files in the current directory
-    Generated Command: ```grep -r "hello" .```
-    Now generate the command for the following query: {query}
+    prompt = f"""You are a command-line assistant. Given a user's query, you generate a shell command 
+    that satisfies the query. Provide a short explanation of the command.
+    The generated command should be executable in the current environment.
+    Current Environment Details: {platform_context}
+    Query: {query}
+    Respond in JSON format with "command" and "explanation" keys.
+    Example:
+    {{"command": "ls -l", "explanation": "Lists all files in the current directory with detailed information."}}
     """
 
     try:
         response = model.generate_content(prompt)
-        return response
-    except google_exceptions.ServiceUnavailable as e:
-        raise GeminiApiError(f"Gemini API Service Unavailable: Is the service down? ({e})") from e
-    except google_exceptions.APIError as e:
-        raise GeminiApiError(f"Gemini API Error: Check your API key and request details. ({e})") from e
-    except google_exceptions.PermissionDenied as e:
-        raise GeminiApiError(f"Gemini API Permission Denied: Insufficient permissions to access the API. ({e})") from e
+        response.resolve()  # Force the API call to check for errors immediately
+        return response.parts[0].text  # Directly return the JSON string, parsing is handled downstream
+    except google_exceptions.QuotaExceeded as e:
+        raise GeminiApiError(
+            "Gemini API Quota Exceeded: You have exceeded your quota for the Gemini API.  Check usage and limits in Google AI Studio.") from e
     except google_exceptions.ResourceExhausted as e:
-         raise GeminiApiError(f"Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
+        raise GeminiApiError(
+            "Gemini API Resource Exhausted: Quota limit reached? ({e})") from e
     except google_exceptions.FailedPrecondition as e:
          raise GeminiApiError(f"Gemini API Failed Precondition: API not enabled or billing issue? ({e})") from e
     except google_exceptions.GoogleAPIError as e:
