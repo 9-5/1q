@@ -3,78 +3,15 @@
 
 import sys
 import re
-from typing import Optional, Union, Dict, Any, Literal, List
+from typing import Optional, Union, Dict, Any, Literal
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical, VerticalScroll, Horizontal
-from textual.widgets import Header, Footer, Label, Input, Button, Static, Markdown, ListItem, ListView
+from textual.containers import Container, Vertical, VerticalScroll
+from textual.widgets import Header, Footer, Label, Input, Button, Static, Markdown
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label
-
-from . import history
-
-class HistoryBrowser(ModalScreen):
-    """A modal screen to display command history."""
-
-    def __init__(self, history_data: List[Dict[str, str]], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
-        super().__init__(name=name, id=id, classes=classes)
-        self.history_data = history_data
-
-    def compose(self) -> ComposeResult:
-        yield Header(title="Command History",tall=False)
-        yield Footer()
-        with VerticalScroll(id="history-container"):
-            for entry in self.history_data:
-                yield Static(f"[bold]Query:[/bold] {entry['query']}\n[bold]Command:[/bold] {entry['command']}\n{'-'*20}", style="bright_white", id="history-entry")
-        yield Horizontal(
-            Button("Close", variant="primary", id="close-history"),
-            Button("Execute", id="execute-history", disabled=True),  # Initially disabled
-            Button("Copy", id="copy-history", disabled=True), # Initially disabled
-            id="history-buttons"
-        )
-        self.selected_entry_index = None
-
-    def on_mount(self) -> None:
-        """Called when the history browser is mounted."""
-        if not self.history_data:
-            self.query_one("#history-container").mount(Static("No history available.", style="italic grey"))
-            self.query_one("#close-history").focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Event handler for button presses."""
-        button_id = event.button.id
-        if button_id == "close-history":
-            self.app.pop_screen()
-        elif button_id == "execute-history":
-             if self.selected_entry_index is not None:
-                command = self.history_data[self.selected_entry_index]['command']
-                self.app.exit(command)
-        elif button_id == "copy-history":
-            if self.selected_entry_index is not None:
-                command = self.history_data[self.selected_entry_index]['command']
-                self.app.exit(("copy", command))
-
-    def on_click(self, event) -> None:
-        """Handles clicks on history entries."""
-        if str(event.target).startswith("Static(markup='[bold]Query:[/bold]"):
-            # Deselect previous selection
-            for entry in self.query_all("#history-entry"):
-                entry.styles.background = "transparent"
-                entry.styles.color = "bright_white"
-
-            # Select new entry
-            event.target.styles.background = "SteelBlue"
-            event.target.styles.color = "black"
-            # Extract the index from the target id
-            history_entries = self.query_all("#history-entry").all()
-            self.selected_entry_index = history_entries.index(event.target)
-
-            # Enable buttons
-            self.query_one("#execute-history").disabled = False
-            self.query_one("#copy-history").disabled = False
-            self.query_one("#execute-history").focus()
 
 
 class ApiKeyApp(App[Union[str, None]]):
@@ -85,101 +22,160 @@ class ApiKeyApp(App[Union[str, None]]):
 
     CSS = """
     Screen { align: center middle; }
-    Vertical { width: auto; height: auto; }
-    Input { width: 60; }
-    Button { margin-top: 1; width: 20; }
-    Label { margin-bottom: 1; }
+    #dialog {
+        grid-size: 2; grid-gutter: 1 2; grid-rows: auto auto auto;
+        padding: 0 1; width: 60; height: auto; max-height: 80%;
+        border: thick $accent; background: $surface;
+    }
+    Label { text-align: center; width: 100%; column-span: 2; }
+    Input { column-span: 2; margin-bottom: 1; }
+    #submit-button { width: 100%; column-span: 1; }
+    #cancel-button { width: 100%; column-span: 2; }
+    .error { color: red; }
     """
 
-    def compose(self) -> ComposeResult:
-        yield Vertical(
-            Label(self.SUB_TITLE),
-            Input(password=True, placeholder="Paste API Key Here", id="api-key-input"),
-            Horizontal(
-                Button("Save", variant="primary", id="save-button"),
-                Button("Cancel", variant="default", id="cancel-button"),
-                ),
-        )
-        yield Footer()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Event handler for button presses."""
-        if event.button.id == "save-button":
-            api_key = self.query_one("#api-key-input", Input).value.strip()
-            if api_key:
-                self.exit(api_key)
-            else:
-                self.notify("API Key cannot be empty.", title="Input Error", severity="error", timeout=2.0)
-        elif event.button.id == "cancel-button":
-            self.exit(None)
-
-
-ResponseAppResult = Optional[Literal["execute", "modify", "refine", "copy", "history"]]
-
-class ResponseApp(App[ResponseAppResult]):
-    """TUI App to display the response and options."""
-
-    TITLE = "1Q - Response"
-    CSS_PATH = None
-
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-
-    #response-container {
-        layout: vertical;
-        width: auto;
-        height: auto;
-        margin: 1;
-        border: tall $primary 2;
-        padding: 1;
-    }
-    
-    #button-container {
-        layout: horizontal;
-        height: auto;
-        margin: 1;
-        align: center middle;
-    }
-
-    Markdown {
-        width: auto;
-    }
-    """
-    BINDINGS = [
-        Binding("escape", "app.quit", "Quit", show=False),
-        Binding("ctrl+e", "execute_command", "Execute", show=True),
-        Binding("ctrl+c", "copy_command", "Copy", show=True),
-        Binding("ctrl+m", "modify_command", "Modify", show=True),
-        Binding("ctrl+r", "refine_query", "Refine", show=True),
-        Binding("ctrl+h", "view_history", "History", show=True),
-
-    ]
-
-    def __init__(self, response_data: Dict[str, Any], name: Optional[str] = None, id: Optional[str] = None, classes: Optional[str] = None):
-         super().__init__(name=name, id=id, classes=classes)
-         self.response_data = response_data
-         self.query_text = response_data.get("query", "No query provided.")
-         self.command_text = response_data.get("command", "")
-         self.explanation_text = response_data.get("explanation", "")
+    api_key = reactive("")
+    error_message = reactive("")
 
     def compose(self) -> ComposeResult:
-        """Compose the UI."""
-        yield Header(title=self.TITLE, tall=False)
-        with Container(id="response-container"):
-            yield Markdown(f"[bold]Query:[/bold]\n{self.query_text}\n\n[bold]Command:[/bold]\n{self.command_text}\n\n[bold]Explanation:[/bold]\n{self.explanation_text}")
-
-        with Container(id="button-container"):
-            yield Button("Execute", variant="primary", id="execute")
-            yield Button("Copy", id="copy")
-            yield Button("Modify", id="modify")
-            yield Button("Refine", id="refine")
-            yield Button("History", id="history")
-        yield Footer()
+        with Container(id="dialog"):
+            yield Label(self.SUB_TITLE)
+            yield Input(placeholder="Paste your API key here...", password=True, id="api-key-input")
+            yield Label(self.error_message, id="error-label", classes="error")
+            yield Button("Submit", variant="primary", id="submit-button")
+            yield Button("Cancel", variant="default", id="cancel-button")
 
     def on_mount(self) -> None:
-        """Called when the app is mounted."""
-        self.set_focus(self.query_one("#execute", Button))
+        self.query_one(Input).focus()
 
-    def on_button_pressed(self, event
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "api-key-input":
+            self.api_key = event.value
+            self.error_message = "" # Clear error
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "api-key-input":
+             self._submit_key()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "submit-button":
+            self._submit_key()
+        elif event.button.id == "cancel-button":
+            self.exit(None) # None indicates cancellation
+
+    def _submit_key(self) -> None:
+        trimmed_key = self.api_key.strip()
+        if trimmed_key:
+            self.exit(trimmed_key)
+        else:
+            self.error_message = "[bold red]API Key cannot be empty.[/]"
+            self.query_one("#error-label", Label).update(self.error_message)
+
+
+def prompt_for_api_key() -> Optional[str]:
+    """Runs the ApiKeyApp and returns the entered key or None if cancelled."""
+    app = ApiKeyApp()
+    result = app.run()
+    return result.strip() if isinstance(result, str) else None
+
+
+ResponseAppResult = Optional[Literal["execute", "modify", "copy", "refine"]]
+
+class ResponseApp(App[ResponseAppResult]):
+    """Textual app to display the structured Gemini response and handle actions."""
+    TITLE = "1Q Response"
+    BINDINGS = [
+        Binding("q", "quit", "Quit", show=True),
+        Binding("ctrl+c", "quit", "Quit", show=False),
+        Binding("c", "copy_command", "Copy Cmd", show=True, key_display="c"),
+        Binding("x", "execute_command", "Execute", show=True, key_display="x"),
+        Binding("m", "modify_command", "Modify", show=True, key_display="m"),
+        Binding("r", "refine_query", "Refine", show=True, key_display="r"),
+    ]
+
+    CSS = """
+    Screen { padding: 1; }
+    VerticalScroll { border: round $accent; padding: 0 1; }
+    Markdown { margin-bottom: 1; }
+    #install-display { border-top: thick $accent; padding-top: 1; }
+    #explanation-display { border-top: thick $accent; padding-top: 1; }
+    """
+
+    def __init__(self, response_data: Dict[str, Any]):
+        super().__init__()
+        self.response_data = response_data
+        raw_command = response_data.get('command')
+
+        # Filter markdown code blocks from command before displaying/copying
+        filtered_command = raw_command
+        if raw_command:
+            code_block_pattern = r'^```[^\n]*\n?(.*?)\n?```$'
+            match = re.search(code_block_pattern, raw_command, re.DOTALL)
+            if match:
+                content = match.group(1).strip()
+                filtered_command = content if content else None
+
+        self.command_text = filtered_command # Store filtered command for actions
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll():
+            # Command (uses filtered text)
+            if self.command_text:
+                # Use ```bash for Markdown syntax highlighting hint
+                command_md = f"### COMMAND\n```bash\n{self.command_text}\n```"
+                yield Markdown(command_md, id="command-display")
+            else:
+                 yield Static("[yellow]No command generated in this response.[/]", id="command-display")
+
+            # Installation
+            if self.response_data.get('install'):
+                 install_md = f"### INSTALLATION\n\n{self.response_data['install']}"
+                 yield Markdown(install_md, id="install-display")
+
+            # Explanation
+            if self.response_data.get('explanation'):
+                explanation_md = f"### EXPLANATION\n\n{self.response_data['explanation']}"
+                yield Markdown(explanation_md, id="explanation-display")
+
+        yield Footer()
+
+    def action_copy_command(self) -> None:
+        """Copies the (filtered) command text to the clipboard and exits."""
+        if not self.command_text:
+             self.notify("No command to copy.", title="Copy Failed", severity="warning", timeout=3.0)
+             return
+        try:
+            self.app.clipboard = self.command_text # Copy filtered command
+            self.notify("Command copied!", title="Copied!", severity="information", timeout=3.0)
+            self.exit("copy") # Exit with 'copy' action
+        except Exception as e:
+             self.notify(f"Error copying: {e}", title="Copy Failed", severity="error", timeout=5.0)
+             # Optionally suggest installing clipboard tools
+             # if sys.platform == "linux" or sys.platform == "darwin":
+             #     self.notify("Tip: Install 'wl-copy', 'xclip'/'xsel', or 'pbcopy'.", timeout=7.0)
+
+    def action_execute_command(self) -> None:
+        """Exits the TUI signalling to execute the command."""
+        if not self.command_text:
+             self.notify("No command to execute.", title="Execute Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("execute")
+
+    def action_modify_command(self) -> None:
+        """Exits the TUI signalling to modify the command."""
+        if not self.command_text:
+             self.notify("No command to modify.", title="Modify Failed", severity="warning", timeout=3.0)
+             return
+        self.exit("modify")
+
+    def action_refine_query(self) -> None:
+        """Exits the TUI signalling to refine the query."""
+        self.exit("refine")
+
+
+def display_response_tui(response_data: Dict[str, Any]) -> ResponseAppResult:
+    """Runs the ResponseApp and returns the chosen action."""
+    app = ResponseApp(response_data=response_data) # Filtering happens in __init__
+    result = app.run()
+    return result

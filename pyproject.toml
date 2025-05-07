@@ -12,7 +12,7 @@ readme = "README.md"
 requires-python = ">=3.8" # Minimum Python version
 license = { file = "LICENSE" } # Or { text = "MIT" } etc.
 authors = [
-  { name: "John Le", email: "john@oj.hn" },
+  { name = "John Le", email = "john@oj.hn" },
 ]
 keywords = ["cli", "ai", "commandgen", "codegen", "devtool"]
 classifiers = [
@@ -22,8 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-... (FILE CONTENT TRUNCATED) ...
-onment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Code Generators",
     "Topic :: Utilities",
